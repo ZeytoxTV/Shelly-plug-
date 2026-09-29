@@ -113,6 +113,26 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(st["energy_wh"], 10)
         srv.shutdown(); srv.server_close()
 
+    def test_gen1_auth_required(self):
+        cls = type("F", (FakeShelly,), {"gen": 1, "state": {"on": False}})
+        orig = cls.do_GET
+
+        def do_GET(h):
+            if h.path == "/shelly":
+                return h._send({"type": "SHPLG-S", "auth": True})
+            if h.headers.get("Authorization") != "Basic YWRtaW46cHc=":
+                return h._send({}, 401, [("WWW-Authenticate", 'Basic realm="shelly"')])
+            return orig(h)
+
+        cls.do_GET = do_GET
+        srv = start(cls)
+        with self.assertRaises(ShellyAuthError):
+            ShellyClient(f"127.0.0.1:{srv.server_port}").info()
+        c = ShellyClient(f"127.0.0.1:{srv.server_port}", "admin", "pw")
+        self.assertEqual(c.info()["name"], "Cuisine")
+        self.assertTrue(c.switch("on")["on"])
+        srv.shutdown(); srv.server_close()
+
     def test_digest_auth(self):
         srv, _ = fake(2, password="secret")
         self.assertTrue(ShellyClient(f"127.0.0.1:{srv.server_port}", password="secret").switch("on")["on"])

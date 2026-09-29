@@ -117,9 +117,13 @@ class ShellyClient:
                 "mac": data.get("mac"),
             }
         self.gen = 1
+        if data.get("auth") and not self.password:
+            raise ShellyAuthError("Mot de passe requis pour cet appareil")
         name = None
         try:
             name = self.get("/settings").get("name")
+        except ShellyAuthError:
+            raise
         except ShellyError:
             pass
         return {"gen": 1, "model": data.get("type"), "name": name, "mac": data.get("mac")}
