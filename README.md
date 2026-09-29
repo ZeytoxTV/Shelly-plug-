@@ -89,7 +89,15 @@ curl -fsSL https://raw.githubusercontent.com/ZeytoxTV/Shelly-plug-/claude/shelly
 
 Le script installe ce qu'il manque (`python3`, `git`), télécharge l'appli dans `~/shelly-app`,
 crée un service systemd qui la démarre avec le Pi, puis affiche l'adresse à ouvrir.
-Relance la même commande pour mettre à jour.
+
+**Mises à jour automatiques** : toutes les heures, le Pi regarde s'il y a une nouvelle version sur
+GitHub (quelques Ko) et, seulement si c'est le cas, l'installe et redémarre l'appli. Tes prises,
+horaires et historique sont conservés, et la page ouverte sur le téléphone se recharge d'elle-même.
+Pour désactiver : relancer l'installation avec `SHELLY_AUTO_UPDATE=0`.
+Journal : `journalctl -u shelly-app-update`.
+
+Ressources sur le Pi : environ 30–40 Mo de RAM, ~6 Mo de disque par prise pour 30 jours d'historique
+(90 jours max conservés).
 
 Pour ouvrir l'appli depuis ton téléphone **hors de chez toi**, ajoute Tailscale (VPN gratuit) :
 

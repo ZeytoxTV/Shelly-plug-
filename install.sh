@@ -4,6 +4,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/ZeytoxTV/Shelly-plug-/claude/shelly-plug-controller-app-0lh3tk/install.sh | bash
 #
 # Variables optionnelles : SHELLY_PORT (défaut 8080), SHELLY_BRANCH, SHELLY_DIR,
+# SHELLY_AUTO_UPDATE=0 pour désactiver la mise à jour automatique (toutes les heures),
 # TAILSCALE=1 pour installer aussi Tailscale (accès depuis ton téléphone hors de chez toi).
 set -euo pipefail
 
@@ -52,9 +53,41 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
+if [ "${SHELLY_AUTO_UPDATE:-1}" = "1" ]; then
+  echo "==> Mise à jour automatique (vérification toutes les heures)"
+  $SUDO tee /etc/systemd/system/shelly-app-update.service >/dev/null <<UNIT
+[Unit]
+Description=Mise à jour de Shelly App
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash $DIR/scripts/auto-update.sh $DIR $BRANCH $RUN_USER
+UNIT
+  $SUDO tee /etc/systemd/system/shelly-app-update.timer >/dev/null <<UNIT
+[Unit]
+Description=Vérifie les mises à jour de Shelly App toutes les heures
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+fi
+
 $SUDO systemctl daemon-reload
 $SUDO systemctl enable -q shelly-app
 $SUDO systemctl restart shelly-app
+if [ "${SHELLY_AUTO_UPDATE:-1}" = "1" ]; then
+  $SUDO systemctl enable -q --now shelly-app-update.timer
+else
+  $SUDO systemctl disable -q --now shelly-app-update.timer 2>/dev/null || true
+fi
 
 sleep 2
 if ! $SUDO systemctl is-active -q shelly-app; then
@@ -81,5 +114,9 @@ TZ_NAME="$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone
 echo "   Heure du Pi : $(date '+%H:%M') ($TZ_NAME) — les horaires programmés suivent cette heure."
 echo "   (Si ce n'est pas la bonne : sudo timedatectl set-timezone Europe/Paris)"
 echo
-echo "   Mise à jour : relance cette même commande."
+if [ "${SHELLY_AUTO_UPDATE:-1}" = "1" ]; then
+  echo "   Mises à jour : automatiques (vérification toutes les heures)."
+else
+  echo "   Mise à jour : relance cette même commande."
+fi
 echo "   Journal     : sudo journalctl -u shelly-app -f"

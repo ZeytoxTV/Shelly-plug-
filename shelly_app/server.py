@@ -7,6 +7,7 @@ import argparse
 import json
 import mimetypes
 import threading
+import time
 import urllib.parse
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -17,6 +18,8 @@ from .history import History
 from .shelly import CloudClient, ShellyAuthError, ShellyClient, ShellyError
 
 STATIC_DIR = Path(__file__).parent / "static"
+# Change à chaque démarrage : la page se recharge d'elle-même après une mise à jour.
+APP_VERSION = str(int(time.time()))
 PUBLIC_FIELDS = ("id", "name", "host", "model", "gen", "mode", "device_id")
 
 
@@ -100,6 +103,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-App-Version", APP_VERSION)
         self.end_headers()
         self.wfile.write(body)
 
@@ -265,6 +269,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(body)
 

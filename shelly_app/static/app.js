@@ -10,12 +10,21 @@ const form = document.getElementById("add-form");
 const addError = document.getElementById("add-error");
 const cards = new Map();
 
+// Après une mise à jour du serveur, recharge la page (sauf si un panneau est ouvert).
+let appVersion = null;
+function checkVersion(v) {
+  if (!v) return;
+  if (appVersion === null) appVersion = v;
+  else if (v !== appVersion && !document.querySelector("dialog[open]")) location.reload();
+}
+
 async function api(path, options = {}) {
   const res = await fetch(path, {
     headers: { "Content-Type": "application/json" },
     ...options,
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
+  checkVersion(res.headers.get("X-App-Version"));
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Erreur ${res.status}`);
   return data;
