@@ -118,8 +118,8 @@ class History:
                     yield ts, delta
             prev = (ts, power, energy)
 
-    def daily_energy(self, device_id, days=7, now=None, off_peak=None):
-        """Énergie consommée par jour (Wh), en heure locale, dont la part en heures creuses."""
+    def daily_energy(self, device_id, days=7, now=None, price_at=None):
+        """Énergie (Wh) et coût (€, si price_at est fourni) par jour, en heure locale."""
         now = now or time.time()
         today = datetime.fromtimestamp(now).date()
         first = today - timedelta(days=days - 1)
@@ -130,25 +130,27 @@ class History:
             day = datetime.fromtimestamp(ts).date()
             if day in totals:
                 totals[day][0] += delta
-                if off_peak and off_peak(ts):
-                    totals[day][1] += delta
+                if price_at:
+                    totals[day][1] += delta * price_at(ts) / 1000
                 has_data.add(day)
         return [
             {
                 "date": d.isoformat(),
                 "wh": round(wh, 1) if d in has_data else None,
-                "wh_hc": round(hc, 1) if d in has_data else None,
+                "eur": round(eur, 4) if d in has_data and price_at else None,
             }
-            for d, (wh, hc) in totals.items()
+            for d, (wh, eur) in totals.items()
         ]
 
-    def energy_between(self, device_id, since, until=None, off_peak=None):
-        """(Wh, Wh en heures creuses) consommés sur une période ; (None, None) sans mesure."""
-        total = hc = 0.0
+    def energy_between(self, device_id, since, until=None, price_at=None):
+        """(Wh, €) consommés sur une période ; (None, None) sans mesure."""
+        total = eur = 0.0
         seen = False
         for ts, delta in self._deltas(device_id, int(since), until):
             seen = True
             total += delta
-            if off_peak and off_peak(ts):
-                hc += delta
-        return (round(total, 1), round(hc, 1)) if seen else (None, None)
+            if price_at:
+                eur += delta * price_at(ts) / 1000
+        if not seen:
+            return None, None
+        return round(total, 1), (round(eur, 4) if price_at else None)

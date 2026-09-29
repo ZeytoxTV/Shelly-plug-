@@ -217,19 +217,28 @@ class ServerTests(unittest.TestCase):
 
     def test_pricing_settings_and_cost(self):
         code, data = self.req("GET", "/api/settings")
-        self.assertEqual((code, data["pricing"]["hc_enabled"]), (200, False))
-        code, data = self.req("PUT", "/api/settings", {"pricing": {"base": 0.25}})
-        self.assertEqual((code, data["pricing"]["base"]), (200, 0.25))
-        self.assertEqual(json.loads((Path(self.tmp.name) / "settings.json").read_text())["pricing"]["base"], 0.25)
-        self.assertEqual(self.req("PUT", "/api/settings", {"pricing": {"base": 99}})[0], 400)
+        self.assertEqual((code, len(data["pricing"]["tariffs"])), (200, 1))
+        pricing = {"tariffs": [{"price": 0.25, "periods": [{"name": "HC", "price": 0.15, "start": "22:00", "end": "06:00"}]}]}
+        code, data = self.req("PUT", "/api/settings", {"pricing": pricing})
+        self.assertEqual((code, data["pricing"]["tariffs"][0]["periods"][0]["price"]), (200, 0.15))
+        saved = json.loads((Path(self.tmp.name) / "settings.json").read_text())
+        self.assertEqual(saved["pricing"]["tariffs"][0]["price"], 0.25)
+        self.assertEqual(self.req("PUT", "/api/settings", {"pricing": {"tariffs": [{"price": 99}]}})[0], 400)
 
         _, dev = self.req("POST", "/api/devices", {"host": f"127.0.0.1:{self.plug.server_port}"})
         code, data = self.req("GET", f"/api/devices/{dev['id']}/cost")
-        self.assertEqual((code, data["today"]["eur"], data["hc_enabled"]), (200, None, False))
+        self.assertEqual((code, data["today"]["eur"]), (200, None))
+        self.assertIn(data["price_now"], (0.25, 0.15))
         code, data = self.req("GET", f"/api/devices/{dev['id']}/history?range=7d")
         self.assertIn("eur", data["daily"][0])
         code, data = self.req("GET", f"/api/devices/{dev['id']}/history?range=24h")
         self.assertIn("eur", data["energy"])
+
+    def test_legacy_settings_file_is_migrated(self):
+        path = Path(self.tmp.name) / "settings.json"
+        path.write_text(json.dumps({"pricing": {"hc_enabled": False, "base": 0.3, "hp": 0.3, "hc": 0.2, "hc_ranges": []}}))
+        from shelly_app.server import Settings
+        self.assertEqual(Settings(path).pricing["tariffs"][0]["price"], 0.3)
 
     def test_unreachable(self):
         self.assertEqual(self.req("POST", "/api/devices", {"host": "127.0.0.1:1"})[0], 502)

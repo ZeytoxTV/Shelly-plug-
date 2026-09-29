@@ -182,30 +182,41 @@
       <h2>Tarif de l'électricité</h2>
       <button type="button" class="icon-btn small close" aria-label="Fermer">×</button>
     </div>
-    <p class="hint">Reprends les prix du kWh TTC indiqués sur ta facture ou ton espace client.
-      Les coûts sont recalculés sur tout l'historique.</p>
-    <div class="segmented" role="radiogroup" aria-label="Type de tarif">
-      <label><input type="radio" name="tariff" value="base" checked> Tarif unique</label>
-      <label><input type="radio" name="tariff" value="hphc"> Heures creuses</label>
-    </div>
-    <section data-tariff="base">
-      <label class="field">Prix du kWh <span class="unit-input"><input type="number" id="price-base" min="0" max="5" step="0.0001" inputmode="decimal"> €</span></label>
-    </section>
-    <section data-tariff="hphc" hidden>
-      <div class="row">
-        <label class="field">Heures pleines <span class="unit-input"><input type="number" id="price-hp" min="0" max="5" step="0.0001" inputmode="decimal"> €/kWh</span></label>
-        <label class="field">Heures creuses <span class="unit-input"><input type="number" id="price-hc" min="0" max="5" step="0.0001" inputmode="decimal"> €/kWh</span></label>
-      </div>
-      <h3>Plages d'heures creuses</h3>
-      <ul class="ranges"></ul>
-      <button type="button" class="chip" id="range-add">+ Ajouter une plage</button>
-    </section>
+    <p class="hint">Prix du kWh <strong>TTC</strong> de ta facture. Ajoute une période pour chaque plage
+      à un autre prix (heures creuses, heures vertes…), et un changement de prix daté si ton fournisseur
+      t'a annoncé une évolution : les coûts passés gardent l'ancien prix.</p>
+    <div class="tariffs"></div>
+    <button type="button" class="chip" id="tariff-add">+ Ajouter un changement de prix</button>
     <p class="error" id="settings-error" hidden></p>
     <div class="actions">
       <button type="button" class="ghost close">Annuler</button>
       <button type="button" id="settings-save" class="primary">Enregistrer</button>
     </div>
   </dialog>
+
+  <template id="tariff-tpl">
+    <fieldset class="tariff">
+      <div class="tariff-head">
+        <h3 class="tariff-title">Tarif</h3>
+        <label class="tariff-date">à partir du <input type="date" class="t-from"></label>
+        <button type="button" class="t-remove" aria-label="Supprimer ce changement de prix">×</button>
+      </div>
+      <label class="field">Prix du kWh (heures pleines ou tarif unique)
+        <span class="unit-input"><input type="number" class="t-price" min="0" max="5" step="0.00001" inputmode="decimal"> €</span>
+      </label>
+      <ul class="periods"></ul>
+      <button type="button" class="chip p-add">+ Ajouter une période à un autre prix</button>
+    </fieldset>
+  </template>
+
+  <template id="period-tpl">
+    <li class="period">
+      <input class="p-name" placeholder="Heures creuses" maxlength="40" aria-label="Nom de la période">
+      <span class="unit-input"><input type="number" class="p-price" min="0" max="5" step="0.00001" inputmode="decimal" aria-label="Prix du kWh"> €</span>
+      <span class="p-times"><input type="time" class="p-start" aria-label="Début"> à <input type="time" class="p-end" aria-label="Fin"></span>
+      <button type="button" class="p-remove" aria-label="Supprimer cette période">×</button>
+    </li>
+  </template>
 
   <script src="chart.js"></script>
   <script src="schedule.js"></script>

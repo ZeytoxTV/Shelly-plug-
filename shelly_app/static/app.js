@@ -305,40 +305,71 @@ const ChartPanel = (() => {
 const SettingsPanel = (() => {
   const dlg = document.getElementById("settings-dialog");
   const err = dlg.querySelector("#settings-error");
-  const ranges = dlg.querySelector(".ranges");
+  const list = dlg.querySelector(".tariffs");
+  const tariffTpl = document.getElementById("tariff-tpl");
+  const periodTpl = document.getElementById("period-tpl");
 
-  function syncTariff() {
-    const mode = dlg.querySelector("input[name=tariff]:checked").value;
-    dlg.querySelectorAll("section[data-tariff]").forEach((s) => (s.hidden = s.dataset.tariff !== mode));
+  function addPeriod(ul, p = {}) {
+    const li = periodTpl.content.firstElementChild.cloneNode(true);
+    li.querySelector(".p-name").value = p.name || "";
+    li.querySelector(".p-price").value = p.price ?? "";
+    li.querySelector(".p-start").value = p.start || "00:00";
+    li.querySelector(".p-end").value = p.end || "06:00";
+    li.querySelector(".p-remove").addEventListener("click", () => li.remove());
+    ul.append(li);
   }
-  dlg.querySelectorAll("input[name=tariff]").forEach((r) => r.addEventListener("change", syncTariff));
 
-  function addRange(start = "22:00", end = "06:00") {
-    const li = document.createElement("li");
-    li.innerHTML = `<input type="time" class="r-start" value="${start}" required><span>à</span>` +
-      `<input type="time" class="r-end" value="${end}" required>` +
-      `<button type="button" aria-label="Retirer cette plage">×</button>`;
-    li.querySelector("button").addEventListener("click", () => li.remove());
-    ranges.append(li);
+  function addTariff(t = {}) {
+    const fs = tariffTpl.content.firstElementChild.cloneNode(true);
+    fs.querySelector(".t-price").value = t.price ?? "";
+    fs.querySelector(".t-from").value = t.from || "";
+    const ul = fs.querySelector(".periods");
+    (t.periods || []).forEach((p) => addPeriod(ul, p));
+    fs.querySelector(".p-add").addEventListener("click", () => addPeriod(ul));
+    fs.querySelector(".t-remove").addEventListener("click", () => { fs.remove(); retitle(); });
+    list.append(fs);
+    retitle();
   }
-  dlg.querySelector("#range-add").addEventListener("click", () => {
-    if (ranges.children.length < 4) addRange("12:00", "14:00");
+
+  function retitle() {
+    const today = new Date().toLocaleDateString("sv");
+    const all = [...list.children];
+    all.forEach((fs, i) => {
+      const from = fs.querySelector(".t-from").value;
+      const next = all[i + 1]?.querySelector(".t-from").value;
+      const active = (i === 0 || (from && from <= today)) && !(next && next <= today);
+      fs.querySelector(".tariff-title").textContent =
+        (i === 0 ? "Tarif" : "Nouveau prix") + (active ? " · en cours" : "");
+    });
+  }
+  list.addEventListener("change", retitle);
+
+  dlg.querySelector("#tariff-add").addEventListener("click", () => {
+    const last = read().pop();
+    const d = new Date();
+    const firstOfNextMonth = new Date(d.getFullYear(), d.getMonth() + 1, 1).toLocaleDateString("sv");
+    addTariff({ ...last, from: firstOfNextMonth });
   });
+
+  function read() {
+    return [...list.children].map((fs, i) => ({
+      from: i === 0 ? null : fs.querySelector(".t-from").value || null,
+      price: Number(fs.querySelector(".t-price").value),
+      periods: [...fs.querySelectorAll(".period")].map((li) => ({
+        name: li.querySelector(".p-name").value.trim() || "Période",
+        price: Number(li.querySelector(".p-price").value),
+        start: li.querySelector(".p-start").value,
+        end: li.querySelector(".p-end").value,
+      })),
+    }));
+  }
 
   dlg.querySelector("#settings-save").addEventListener("click", async (ev) => {
     const btn = ev.currentTarget;
     err.hidden = true;
-    const hc = dlg.querySelector("input[name=tariff]:checked").value === "hphc";
-    const pricing = {
-      hc_enabled: hc,
-      base: Number(dlg.querySelector("#price-base").value),
-      hp: Number(dlg.querySelector("#price-hp").value),
-      hc: Number(dlg.querySelector("#price-hc").value),
-      hc_ranges: [...ranges.children].map((li) => [li.querySelector(".r-start").value, li.querySelector(".r-end").value]),
-    };
     btn.disabled = true;
     try {
-      await api("/api/settings", { method: "PUT", body: { pricing } });
+      await api("/api/settings", { method: "PUT", body: { pricing: { tariffs: read() } } });
       dlg.close();
       cards.forEach((c) => refreshCost(c, true));
     } catch (e) {
@@ -353,14 +384,9 @@ const SettingsPanel = (() => {
   return {
     async open() {
       const { pricing } = await api("/api/settings");
-      dlg.querySelector(`input[name=tariff][value=${pricing.hc_enabled ? "hphc" : "base"}]`).checked = true;
-      dlg.querySelector("#price-base").value = pricing.base;
-      dlg.querySelector("#price-hp").value = pricing.hp;
-      dlg.querySelector("#price-hc").value = pricing.hc;
-      ranges.replaceChildren();
-      (pricing.hc_ranges.length ? pricing.hc_ranges : [["22:00", "06:00"]]).forEach(([a, b]) => addRange(a, b));
+      list.replaceChildren();
+      pricing.tariffs.forEach(addTariff);
       err.hidden = true;
-      syncTariff();
       dlg.showModal();
     },
   };

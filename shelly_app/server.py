@@ -16,7 +16,7 @@ from pathlib import Path
 
 from .automation import DEFAULT_SCHEDULE, Automation, next_event, normalize_schedule
 from .history import History
-from .pricing import DEFAULT_PRICING, cost, normalize_pricing, off_peak_checker
+from .pricing import DEFAULT_PRICING, normalize_pricing, price_function
 from .shelly import CloudClient, ShellyAuthError, ShellyClient, ShellyError
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -86,14 +86,18 @@ class Settings:
     def __init__(self, path):
         self.path = Path(path)
         self.lock = threading.Lock()
-        self.data = {"pricing": dict(DEFAULT_PRICING)}
+        self.data = {"pricing": DEFAULT_PRICING}
         if self.path.exists():
             self.data.update(json.loads(self.path.read_text(encoding="utf-8")))
+        try:  # migre l'ancien format (tarif unique / HP-HC)
+            self.data["pricing"] = normalize_pricing(self.data["pricing"])
+        except ValueError:
+            self.data["pricing"] = DEFAULT_PRICING
 
     @property
     def pricing(self):
         with self.lock:
-            return dict(self.data["pricing"])
+            return json.loads(json.dumps(self.data["pricing"]))
 
     def set_pricing(self, pricing):
         with self.lock:
@@ -189,20 +193,16 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(200, self._schedule_payload(device))
                 query = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(self.path).query))
                 rng = query.get("range", "24h")
-                pricing = self.settings.pricing
-                off_peak = off_peak_checker(pricing)
+                price_at = price_function(self.settings.pricing)
                 if rng == "24h":
-                    now = time.time()
-                    wh, wh_hc = self.history.energy_between(device["id"], now - 86400, off_peak=off_peak)
+                    wh, eur = self.history.energy_between(device["id"], time.time() - 86400, price_at=price_at)
                     return self._json(200, {
                         "range": rng,
                         "power": self.history.power_series(device["id"]),
-                        "energy": {"wh": wh, "wh_hc": wh_hc, "eur": cost(wh, wh_hc, pricing)},
+                        "energy": {"wh": wh, "eur": eur},
                     })
                 if rng in ("7d", "30d"):
-                    days = self.history.daily_energy(device["id"], int(rng[:-1]), off_peak=off_peak)
-                    for d in days:
-                        d["eur"] = cost(d["wh"], d["wh_hc"], pricing)
+                    days = self.history.daily_energy(device["id"], int(rng[:-1]), price_at=price_at)
                     return self._json(200, {"range": rng, "daily": days})
                 return self._json(400, {"error": "range doit être 24h, 7d ou 30d"})
             return self._json(404, {"error": "Introuvable"})
@@ -281,18 +281,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def _cost(self, device_id, now=None):
         """Énergie et coût d'aujourd'hui et du mois en cours."""
-        pricing = self.settings.pricing
-        off_peak = off_peak_checker(pricing)
+        price_at = price_function(self.settings.pricing)
         now = now or time.time()
         dt = datetime.fromtimestamp(now)
         periods = {
             "today": dt.replace(hour=0, minute=0, second=0, microsecond=0),
             "month": dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0),
         }
-        out = {"hc_enabled": pricing["hc_enabled"]}
+        out = {"price_now": price_at(now)}
         for key, start in periods.items():
-            wh, wh_hc = self.history.energy_between(device_id, start.timestamp(), off_peak=off_peak)
-            out[key] = {"wh": wh, "wh_hc": wh_hc, "eur": cost(wh, wh_hc, pricing)}
+            wh, eur = self.history.energy_between(device_id, start.timestamp(), price_at=price_at)
+            out[key] = {"wh": wh, "eur": eur}
         return out
 
     def _schedule_payload(self, device):
