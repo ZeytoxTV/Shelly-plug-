@@ -62,13 +62,25 @@
   <dialog id="add-dialog">
     <form method="dialog" id="add-form">
       <h2>Ajouter une prise</h2>
-      <label>Adresse IP <input name="host" required placeholder="192.168.1.50" autocomplete="off" inputmode="url"></label>
+      <div class="segmented" role="radiogroup" aria-label="Mode de connexion">
+        <label><input type="radio" name="mode" value="local" checked> Wi‑Fi maison</label>
+        <label><input type="radio" name="mode" value="cloud"> Cloud (partout)</label>
+      </div>
+      <fieldset data-mode="local">
+        <label>Adresse IP <input name="host" required placeholder="192.168.1.50" autocomplete="off" inputmode="url"></label>
+        <details>
+          <summary>Authentification (si activée)</summary>
+          <label>Utilisateur <input name="username" placeholder="admin" autocomplete="username"></label>
+          <label>Mot de passe <input name="password" type="password" autocomplete="current-password"></label>
+        </details>
+      </fieldset>
+      <fieldset data-mode="cloud" hidden disabled>
+        <p class="hint">Dans l'appli Shelly : <strong>Paramètres utilisateur → Clé d'autorisation cloud</strong> pour le serveur et la clé ; <strong>Paramètres de la prise → Informations sur le dispositif</strong> pour l'identifiant.</p>
+        <label>Serveur <input name="server" required placeholder="shelly-XX-eu.shelly.cloud" autocomplete="off" inputmode="url"></label>
+        <label>Clé d'autorisation <input name="auth_key" required type="password" autocomplete="off"></label>
+        <label>Identifiant du dispositif <input name="device_id" required placeholder="083a8dc17ef5" autocomplete="off"></label>
+      </fieldset>
       <label>Nom (optionnel) <input name="name" placeholder="Salon"></label>
-      <details>
-        <summary>Authentification (si activée)</summary>
-        <label>Utilisateur <input name="username" placeholder="admin" autocomplete="username"></label>
-        <label>Mot de passe <input name="password" type="password" autocomplete="current-password"></label>
-      </details>
       <p class="error" id="add-error" hidden></p>
       <div class="actions">
         <button type="button" id="add-cancel" class="ghost">Annuler</button>

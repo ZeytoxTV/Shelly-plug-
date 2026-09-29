@@ -1,6 +1,8 @@
 # Shelly App
 
-Petite appli web pour piloter tes prises **Shelly** (Plug S, Plus Plug S, Plug Gen3…) depuis ton ordinateur ou ton téléphone, directement sur ton réseau local — sans cloud, sans compte.
+Petite appli web pour piloter tes prises **Shelly** (Plug S, Plus Plug S, Plug Gen3…) depuis ton ordinateur ou ton téléphone :
+- **Wi‑Fi maison** : directement sur le réseau local, sans cloud ;
+- **Cloud (partout)** : via le Cloud Shelly, pour piloter la prise quand tu n'es pas chez toi.
 
 Aucune dépendance : uniquement la bibliothèque standard Python (3.8+).
 
@@ -22,6 +24,20 @@ python3 -m shelly_app
 
 Puis ouvre <http://localhost:8080>, appuie sur **+** et entre l'adresse IP de ta prise
 (visible dans l'appli Shelly officielle ou sur l'interface de ta box).
+
+### Piloter à distance (mode Cloud)
+
+Pas besoin d'être sur le Wi‑Fi de la maison : l'appli passe par les serveurs Shelly,
+comme l'appli officielle. Dans le formulaire d'ajout, choisis **Cloud (partout)** et renseigne :
+
+| Champ | Où le trouver dans l'appli Shelly |
+| --- | --- |
+| Serveur | Paramètres utilisateur → Clé d'autorisation cloud (ex. `shelly-103-eu.shelly.cloud`) |
+| Clé d'autorisation | Même écran, « Obtenir la clé » |
+| Identifiant du dispositif | Prise → Paramètres → Informations sur le dispositif (ex. `083a8dc17ef5`) |
+
+Le Cloud Shelly limite à 1 requête par seconde : les mesures sont rafraîchies toutes les 10 s
+dans ce mode. La clé cloud donne accès à tous tes appareils Shelly : garde `devices.json` pour toi.
 
 ### Depuis ton téléphone
 

@@ -11,9 +11,10 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .shelly import ShellyAuthError, ShellyClient, ShellyError
+from .shelly import CloudClient, ShellyAuthError, ShellyClient, ShellyError
 
 STATIC_DIR = Path(__file__).parent / "static"
+PUBLIC_FIELDS = ("id", "name", "host", "model", "gen", "mode", "device_id")
 
 
 class DeviceStore:
@@ -34,7 +35,7 @@ class DeviceStore:
     def public(self):
         with self.lock:
             return [
-                {k: d.get(k) for k in ("id", "name", "host", "model", "gen")} for d in self.devices
+                {k: d.get(k) for k in PUBLIC_FIELDS} for d in self.devices
             ]
 
     def get(self, device_id):
@@ -68,6 +69,8 @@ class DeviceStore:
 
 
 def client_for(device):
+    if device.get("mode") == "cloud":
+        return CloudClient(device["server"], device["auth_key"], device["device_id"])
     return ShellyClient(
         device["host"], device.get("username"), device.get("password"), device.get("gen")
     )
@@ -164,27 +167,37 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(404, {"error": "Introuvable"})
 
     def _add_device(self, body):
-        host = (body.get("host") or "").strip()
-        if not host:
-            return self._json(400, {"error": "Adresse IP requise"})
-        client = ShellyClient(host, body.get("username"), body.get("password"))
+        cloud = body.get("mode") == "cloud"
+        if cloud:
+            fields = {k: (body.get(k) or "").strip() for k in ("server", "auth_key", "device_id")}
+            if not all(fields.values()):
+                return self._json(400, {"error": "Serveur, clé cloud et identifiant requis"})
+            client = CloudClient(**fields)
+            device = {"mode": "cloud", **fields, "device_id": client.device_id, "host": "Cloud Shelly"}
+        else:
+            host = (body.get("host") or "").strip()
+            if not host:
+                return self._json(400, {"error": "Adresse IP requise"})
+            client = ShellyClient(host, body.get("username"), body.get("password"))
+            device = {
+                "mode": "local",
+                "host": host,
+                "username": body.get("username") or None,
+                "password": body.get("password") or None,
+            }
         try:
             info = client.info()
         except ShellyAuthError as e:
             return self._json(401, {"error": str(e)})
         except ShellyError as e:
             return self._json(502, {"error": str(e)})
-        device = self.store.add(
-            {
-                "name": (body.get("name") or "").strip() or info.get("name") or info.get("model") or host,
-                "host": host,
-                "username": body.get("username") or None,
-                "password": body.get("password") or None,
-                "gen": info["gen"],
-                "model": info.get("model"),
-            }
+        device.update(
+            name=(body.get("name") or "").strip() or info.get("name") or info.get("model") or device["host"],
+            gen=info["gen"],
+            model=info.get("model"),
         )
-        return self._json(201, {k: device[k] for k in ("id", "name", "host", "model", "gen")})
+        device = self.store.add(device)
+        return self._json(201, {k: device.get(k) for k in PUBLIC_FIELDS})
 
     def _static(self, parts):
         rel = "/".join(parts) or "index.html"

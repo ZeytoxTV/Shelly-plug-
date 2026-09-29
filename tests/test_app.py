@@ -193,3 +193,82 @@ class ServerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FakeCloud(BaseHTTPRequestHandler):
+    """Simule l'API Cloud Shelly v2 avec une Plug S Gen1."""
+
+    state = None
+
+    def log_message(self, *args):
+        pass
+
+    def _send(self, payload, code=200):
+        body = json.dumps(payload).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        url = urllib.parse.urlparse(self.path)
+        if dict(urllib.parse.parse_qsl(url.query)).get("auth_key") != "KEY":
+            return self._send({"error": "UNAUTHORIZED"}, 401)
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        s = self.state
+        if url.path == "/v2/devices/api/get":
+            if body["ids"] != ["083a8dc17ef5"]:
+                return self._send([])
+            return self._send([{
+                "id": "083a8dc17ef5", "type": "relay", "code": "SHPLG-S", "gen": "G1", "online": 1,
+                "status": {"relays": [{"ison": s["on"], "has_timer": False}], "meters": [{"power": 80.0, "total": 6000}], "temperature": 28.0},
+                "settings": {"name": "PC THOMAS"},
+            }])
+        if url.path == "/v2/devices/api/set/switch":
+            s["on"] = body["on"]
+            s["timer"] = body.get("toggle_after")
+            return self._send(None)
+        self._send({"error": "not found"}, 404)
+
+
+class CloudTests(unittest.TestCase):
+    def setUp(self):
+        cls = type("C", (FakeCloud,), {"state": {"on": False, "timer": None}})
+        self.state = cls.state
+        self.srv = start(cls)
+        self.server = f"http://127.0.0.1:{self.srv.server_port}"
+
+    def tearDown(self):
+        self.srv.shutdown(); self.srv.server_close()
+
+    def test_cloud_client(self):
+        from shelly_app.shelly import CloudClient
+
+        c = CloudClient(self.server, "KEY", "083A8DC17EF5")
+        self.assertEqual(c.info(), {"gen": 1, "model": "SHPLG-S", "name": "PC THOMAS"})
+        st = c.status()
+        self.assertEqual((st["on"], st["power"], st["energy_wh"]), (False, 80.0, 100))
+        self.assertTrue(c.switch("on", timer=600)["on"])
+        self.assertEqual((self.state["on"], self.state["timer"]), (True, 600))
+        with self.assertRaises(ShellyAuthError):
+            CloudClient(self.server, "BAD", "083a8dc17ef5").status()
+
+    def test_cloud_via_app(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = make_server("127.0.0.1", 0, Path(tmp) / "d.json")
+            threading.Thread(target=app.serve_forever, daemon=True).start()
+            base = f"http://127.0.0.1:{app.server_port}"
+
+            def req(method, path, body=None):
+                r = urllib.request.Request(base + path, data=json.dumps(body).encode() if body else None,
+                                           method=method, headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(r) as resp:
+                    return json.loads(resp.read())
+
+            dev = req("POST", "/api/devices", {"mode": "cloud", "server": self.server, "auth_key": "KEY", "device_id": "083a8dc17ef5"})
+            self.assertEqual((dev["name"], dev["mode"]), ("PC THOMAS", "cloud"))
+            self.assertNotIn("auth_key", req("GET", "/api/devices")[0])
+            self.assertTrue(req("POST", f"/api/devices/{dev['id']}/switch", {"action": "on"})["on"])
+            self.assertTrue(req("GET", f"/api/devices/{dev['id']}/status")["on"])
+            app.shutdown(); app.server_close()

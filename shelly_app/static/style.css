@@ -105,3 +105,15 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
 }
 .actions button.ghost { background: transparent; color: var(--text); border-color: var(--border); }
 .actions button:disabled { opacity: .6; cursor: wait; }
+
+fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+fieldset[hidden] { display: none; }
+.hint { margin: 0; font-size: .85rem; color: var(--muted); line-height: 1.45; }
+.segmented { display: grid; grid-template-columns: 1fr 1fr; background: var(--bg); border-radius: 10px; padding: 3px; }
+#add-form .segmented label {
+  flex-direction: row; justify-content: center; padding: 8px; border-radius: 8px;
+  cursor: pointer; color: var(--muted); font-weight: 600;
+}
+.segmented input { position: absolute; opacity: 0; pointer-events: none; }
+#add-form .segmented label:has(input:checked) { background: var(--card); color: var(--text); box-shadow: 0 1px 3px rgb(0 0 0 / .15); }
+.segmented label:has(input:focus-visible) { outline: 2px solid var(--accent); }

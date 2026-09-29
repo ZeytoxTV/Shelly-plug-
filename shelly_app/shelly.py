@@ -185,3 +185,111 @@ def _remaining(s):
     if s.get("timer_started_at") is None or s.get("timer_duration") is None:
         return None
     return max(0, round(s["timer_started_at"] + s["timer_duration"] - time.time()))
+
+
+class CloudClient:
+    """Pilotage via le Cloud Shelly (API v2), utilisable hors du réseau local.
+
+    La clé et le serveur se trouvent dans l'appli Shelly :
+    Paramètres utilisateur → Clé d'autorisation cloud.
+    """
+
+    def __init__(self, server, auth_key, device_id):
+        server = server.strip().rstrip("/")
+        if not server.startswith(("http://", "https://")):
+            server = "https://" + server
+        self.base = server
+        self.auth_key = auth_key.strip()
+        self.device_id = device_id.strip().lower()
+
+    def _post(self, path, payload):
+        url = f"{self.base}{path}?" + urllib.parse.urlencode({"auth_key": self.auth_key})
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                raw = resp.read().decode("utf-8")
+                return json.loads(raw) if raw.strip() else None
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                raise ShellyAuthError("Clé cloud refusée par Shelly") from e
+            if e.code == 429:
+                raise ShellyError("Trop de requêtes vers le cloud, réessaie dans une seconde") from e
+            try:
+                err = json.loads(e.read()).get("error")
+            except ValueError:
+                err = None
+            messages = {
+                "DEVICE_OFFLINE": "La prise est hors ligne (pas connectée au cloud)",
+                "DEVICE_NOT_FOUND": "Identifiant de prise inconnu du cloud",
+            }
+            raise ShellyError(messages.get(err, f"Erreur cloud {e.code} {err or ''}".strip())) from e
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            reason = getattr(e, "reason", e)
+            raise ShellyError(f"Cloud Shelly injoignable ({reason})") from e
+
+    def _state(self):
+        data = self._post(
+            "/v2/devices/api/get", {"ids": [self.device_id], "select": ["status", "settings"]}
+        )
+        if not data:
+            raise ShellyError("Identifiant de prise inconnu du cloud")
+        return data[0]
+
+    def info(self):
+        st = self._state()
+        gen = str(st.get("gen", "1")).upper().lstrip("G") or "1"
+        settings = st.get("settings") or {}
+        name = settings.get("name") or (settings.get("sys") or {}).get("device", {}).get("name")
+        return {"gen": int(gen) if gen.isdigit() else 1, "model": st.get("code"), "name": name}
+
+    def status(self):
+        st = self._state()
+        if not st.get("online"):
+            raise ShellyError("La prise est hors ligne (pas connectée au cloud)")
+        s = st.get("status") or {}
+        if "switch:0" in s:
+            sw = s["switch:0"]
+            return {
+                "on": bool(sw.get("output")),
+                "power": sw.get("apower"),
+                "voltage": sw.get("voltage"),
+                "current": sw.get("current"),
+                "energy_wh": (sw.get("aenergy") or {}).get("total"),
+                "temperature": (sw.get("temperature") or {}).get("tC"),
+                "timer_remaining": _remaining(sw),
+            }
+        relay = (s.get("relays") or [{}])[0]
+        meter = (s.get("meters") or [{}])[0]
+        total = meter.get("total")
+        temp = s.get("temperature")
+        if temp is None:
+            temp = (s.get("tmp") or {}).get("tC")
+        return {
+            "on": bool(relay.get("ison")),
+            "power": meter.get("power"),
+            "voltage": None,
+            "current": None,
+            "energy_wh": total / 60 if total is not None else None,
+            "temperature": temp,
+            "timer_remaining": relay.get("timer_remaining") if relay.get("has_timer") else None,
+        }
+
+    def switch(self, action, timer=None):
+        if action not in ("on", "off", "toggle"):
+            raise ValueError("action invalide")
+        if action == "toggle":
+            on = not self.status()["on"]
+            time.sleep(1.1)  # le cloud limite à 1 requête/seconde
+        else:
+            on = action == "on"
+        payload = {"id": self.device_id, "channel": 0, "on": on}
+        if timer:
+            payload["toggle_after"] = timer
+        self._post("/v2/devices/api/set/switch", payload)
+        # Pas de relecture immédiate (limite de débit) : on renvoie l'état demandé.
+        return {"on": on, "timer_remaining": timer or None, "partial": True}

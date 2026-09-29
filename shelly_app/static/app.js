@@ -1,6 +1,7 @@
 "use strict";
 
 const REFRESH_MS = 3000;
+const CLOUD_REFRESH_MS = 10000;
 const list = document.getElementById("devices");
 const empty = document.getElementById("empty");
 const tpl = document.getElementById("card-tpl");
@@ -35,11 +36,13 @@ function fmtDuration(s) {
 
 function render(card, status) {
   const el = card.el;
+  card.on = status.on;
   el.classList.remove("offline");
   el.querySelector(".error").hidden = true;
   const btn = el.querySelector(".power");
   btn.setAttribute("aria-pressed", String(status.on));
   btn.querySelector(".state").textContent = status.on ? "Allumée" : "Éteinte";
+  if (status.partial) return;
   el.querySelector(".power-w").textContent = fmt(status.power, "W");
   el.querySelector(".energy").textContent = fmtEnergy(status.energy_wh);
   el.querySelector(".voltage").textContent = fmt(status.voltage, "V", 0);
@@ -51,6 +54,7 @@ function render(card, status) {
 
 function showError(card, message) {
   const el = card.el;
+  card.on = undefined;
   el.classList.add("offline");
   const err = el.querySelector(".error");
   err.textContent = message;
@@ -59,8 +63,11 @@ function showError(card, message) {
   el.querySelector(".power").setAttribute("aria-pressed", "false");
 }
 
-async function refresh(card) {
+async function refresh(card, force = true) {
   if (card.busy) return;
+  const interval = card.device.mode === "cloud" ? CLOUD_REFRESH_MS : REFRESH_MS;
+  if (!force && Date.now() - (card.last || 0) < interval - 500) return;
+  card.last = Date.now();
   try {
     render(card, await api(`/api/devices/${card.device.id}/status`));
   } catch (e) {
@@ -83,7 +90,7 @@ function createCard(device) {
     try {
       render(card, await api(`/api/devices/${device.id}/switch`, {
         method: "POST",
-        body: { action: "toggle", timer },
+        body: { action: card.on === undefined ? "toggle" : card.on ? "off" : "on", timer },
       }));
       el.querySelector(".timer-select").value = "0";
     } catch (e) {
@@ -127,9 +134,20 @@ async function load() {
 
 document.getElementById("add-btn").addEventListener("click", () => {
   form.reset();
+  applyMode();
   addError.hidden = true;
   dialog.showModal();
 });
+function applyMode() {
+  const mode = form.elements.mode.value;
+  form.querySelectorAll("fieldset[data-mode]").forEach((fs) => {
+    const active = fs.dataset.mode === mode;
+    fs.hidden = !active;
+    fs.disabled = !active;
+  });
+}
+form.querySelectorAll("input[name=mode]").forEach((r) => r.addEventListener("change", applyMode));
+
 document.getElementById("add-cancel").addEventListener("click", () => dialog.close());
 
 form.addEventListener("submit", async (ev) => {
@@ -156,10 +174,10 @@ form.addEventListener("submit", async (ev) => {
 });
 
 setInterval(() => {
-  if (!document.hidden) cards.forEach(refresh);
+  if (!document.hidden) cards.forEach((c) => refresh(c, false));
 }, REFRESH_MS);
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) cards.forEach(refresh);
+  if (!document.hidden) cards.forEach((c) => refresh(c, false));
 });
 
 load();
