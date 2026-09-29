@@ -97,6 +97,7 @@ public class ConfigActivity extends Activity {
 
     private void showDevices(String url, JSONArray devices) {
         Api.prefs(this).edit().putString("server", url).apply();
+        ShellyLinkWidget.updateAll(this);
         if (devices.length() == 0) {
             status.setText("Connecté, mais aucune prise : ajoute-la d'abord dans l'appli web.");
             return;

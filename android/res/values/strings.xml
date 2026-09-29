@@ -5,4 +5,6 @@
     <string name="widget_desc">Allume, éteins et suis la conso de ta prise</string>
     <string name="widget_name_small">Prise Shelly (2×2)</string>
     <string name="widget_desc_small">Version compacte : puissance et bouton marche/arrêt</string>
+    <string name="widget_name_link">Raccourci Shelly App (1×1)</string>
+    <string name="widget_desc_link">Ouvre directement l\'appli web du Pi</string>
 </resources>

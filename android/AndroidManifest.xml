@@ -47,5 +47,17 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_info_small" />
         </receiver>
+
+        <receiver
+            android:name=".ShellyLinkWidget"
+            android:exported="true"
+            android:label="@string/widget_name_link">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_info_link" />
+        </receiver>
     </application>
 </manifest>

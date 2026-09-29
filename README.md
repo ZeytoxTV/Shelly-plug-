@@ -53,8 +53,9 @@ d'historique (`history.db`, à côté de `devices.json`). Touche le graphique po
 
 ### Widget Android 4×4
 
-Une mini-appli Android (32 Ko, sans pub ni traceur) ajoute deux widgets : **Prise Shelly (4×4)**,
-complet, et **Prise Shelly (2×2)**, compact (puissance, état, mini-courbe, bouton). Le 4×4 affiche :
+Une mini-appli Android (36 Ko, sans pub ni traceur) ajoute trois widgets : **Prise Shelly (4×4)**,
+complet, **Prise Shelly (2×2)**, compact (puissance, état, mini-courbe, bouton), et un
+**Raccourci Shelly App (1×1)** qui ouvre directement l'appli web. Le 4×4 affiche :
 état de la prise, puissance, énergie du jour, courbe des dernières 24 h, prochain horaire
 (ou arrêt reporté) et un gros bouton **Allumer / Éteindre**.
 
