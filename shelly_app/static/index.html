@@ -13,7 +13,10 @@
 <body>
   <header class="top">
     <h1>Mes prises</h1>
-    <button id="add-btn" class="icon-btn" aria-label="Ajouter une prise">+</button>
+    <div class="top-actions">
+      <button id="settings-btn" class="icon-btn" aria-label="Tarif de l'électricité">€</button>
+      <button id="add-btn" class="icon-btn" aria-label="Ajouter une prise">+</button>
+    </div>
   </header>
 
   <main id="devices" aria-live="polite"></main>
@@ -23,7 +26,7 @@
     Appuie sur <strong>+</strong> et entre l'adresse IP de ta Shelly.
   </p>
 
-  <p class="footer"><a href="shelly-widget.apk" download>📱 Installer le widget Android (4×4)</a></p>
+  <p class="footer"><a href="shelly-widget.apk" download>📱 Installer les widgets Android</a></p>
 
   <template id="card-tpl">
     <article class="card">
@@ -43,6 +46,8 @@
         <div><dt>Énergie</dt><dd class="energy">—</dd></div>
         <div><dt>Tension</dt><dd class="voltage">—</dd></div>
         <div><dt>Temp.</dt><dd class="temp">—</dd></div>
+        <div class="cost"><dt>Coût aujourd'hui</dt><dd class="cost-today">—</dd></div>
+        <div class="cost"><dt>Coût ce mois</dt><dd class="cost-month">—</dd></div>
       </dl>
       <div class="timer">
         <label>Minuterie
@@ -170,6 +175,36 @@
       <h3>Dernières actions</h3>
       <ul class="events"></ul>
     </section>
+  </dialog>
+
+  <dialog id="settings-dialog" class="sheet">
+    <div class="sheet-head">
+      <h2>Tarif de l'électricité</h2>
+      <button type="button" class="icon-btn small close" aria-label="Fermer">×</button>
+    </div>
+    <p class="hint">Reprends les prix du kWh TTC indiqués sur ta facture ou ton espace client.
+      Les coûts sont recalculés sur tout l'historique.</p>
+    <div class="segmented" role="radiogroup" aria-label="Type de tarif">
+      <label><input type="radio" name="tariff" value="base" checked> Tarif unique</label>
+      <label><input type="radio" name="tariff" value="hphc"> Heures creuses</label>
+    </div>
+    <section data-tariff="base">
+      <label class="field">Prix du kWh <span class="unit-input"><input type="number" id="price-base" min="0" max="5" step="0.0001" inputmode="decimal"> €</span></label>
+    </section>
+    <section data-tariff="hphc" hidden>
+      <div class="row">
+        <label class="field">Heures pleines <span class="unit-input"><input type="number" id="price-hp" min="0" max="5" step="0.0001" inputmode="decimal"> €/kWh</span></label>
+        <label class="field">Heures creuses <span class="unit-input"><input type="number" id="price-hc" min="0" max="5" step="0.0001" inputmode="decimal"> €/kWh</span></label>
+      </div>
+      <h3>Plages d'heures creuses</h3>
+      <ul class="ranges"></ul>
+      <button type="button" class="chip" id="range-add">+ Ajouter une plage</button>
+    </section>
+    <p class="error" id="settings-error" hidden></p>
+    <div class="actions">
+      <button type="button" class="ghost close">Annuler</button>
+      <button type="button" id="settings-save" class="primary">Enregistrer</button>
+    </div>
   </dialog>
 
   <script src="chart.js"></script>

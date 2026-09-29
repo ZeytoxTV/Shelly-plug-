@@ -40,6 +40,12 @@ function fmtEnergy(wh) {
   return wh >= 1000 ? `${num(wh / 1000, 2)} kWh` : `${num(wh, 0)} Wh`;
 }
 
+function fmtEur(eur) {
+  if (eur === null || eur === undefined) return "—";
+  if (eur > 0 && eur < 0.01) return "< 0,01 €";
+  return eur.toLocaleString("fr-FR", { style: "currency", currency: "EUR" });
+}
+
 function fmtDuration(s) {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
   return h ? `${h} h ${String(m).padStart(2, "0")}` : `${m}:${String(sec).padStart(2, "0")}`;
@@ -79,11 +85,37 @@ function showError(card, message) {
   el.querySelector(".power").setAttribute("aria-pressed", "false");
 }
 
+const COST_REFRESH_MS = 60000;
+
+async function refreshCost(card, force = false) {
+  if (!force && Date.now() - (card.costAt || 0) < COST_REFRESH_MS) return;
+  card.costAt = Date.now();
+  try {
+    const c = await api(`/api/devices/${card.device.id}/cost`);
+    const el = card.el;
+    el.querySelector(".cost-today").textContent = fmtEur(c.today.eur);
+    const month = el.querySelector(".cost-month");
+    month.textContent = fmtEur(c.month.eur);
+    // Projection fin de mois au rythme actuel (à partir du 3e jour pour éviter les extrapolations absurdes)
+    const now = new Date();
+    const dayOfMonth = now.getDate() - 1 + (now.getHours() * 60 + now.getMinutes()) / 1440;
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    if (c.month.eur != null && dayOfMonth >= 2) {
+      const s = document.createElement("small");
+      s.textContent = `≈ ${fmtEur((c.month.eur / dayOfMonth) * daysInMonth)} fin du mois`;
+      month.append(s);
+    }
+  } catch {
+    /* le coût n'est qu'indicatif : on garde l'affichage précédent */
+  }
+}
+
 async function refresh(card, force = true) {
   if (card.busy) return;
   const interval = card.device.mode === "cloud" ? CLOUD_REFRESH_MS : REFRESH_MS;
   if (!force && Date.now() - (card.last || 0) < interval - 500) return;
   card.last = Date.now();
+  refreshCost(card, force);
   try {
     render(card, await api(`/api/devices/${card.device.id}/status`));
   } catch (e) {
@@ -214,9 +246,10 @@ const ChartPanel = (() => {
       const avg = pts.length ? pts.reduce((a, p) => a + p.avg, 0) / pts.length : null;
       const peak = pts.length ? pts.reduce((a, p) => (p.max > a.max ? p : a)) : null;
       const wh = pts.reduce((a, p) => a + p.avg / 6, 0);
-      tiles.innerHTML = tile("Moyenne", fmt(avg, "W", 0)) +
-        tile("Pic", peak ? `${Math.round(peak.max)} W <small>${hhmm(peak.ts)}</small>` : "—") +
-        tile("Énergie 24 h", pts.length ? fmtEnergy(wh) : "—");
+      const e = data.energy || {};
+      tiles.innerHTML = tile("Coût 24 h", e.eur != null ? `${fmtEur(e.eur)} <small>${fmtEnergy(e.wh)}</small>` : "—") +
+        tile("Moyenne", fmt(avg, "W", 0)) +
+        tile("Pic", peak ? `${Math.round(peak.max)} W <small>${hhmm(peak.ts)}</small>` : "—");
       empty.hidden = pts.length > 0;
       wrap.hidden = !pts.length;
       if (pts.length) Charts.power(svg, data.power);
@@ -228,15 +261,16 @@ const ChartPanel = (() => {
       const total = days.reduce((a, d) => a + d.wh, 0);
       const best = days.length ? days.reduce((a, d) => (d.wh > a.wh ? d : a)) : null;
       const dayLabel = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" });
-      tiles.innerHTML = tile("Total", days.length ? fmtEnergy(total) : "—") +
-        tile("Moyenne / jour", days.length ? fmtEnergy(total / days.length) : "—") +
-        tile("Jour max", best ? `${fmtEnergy(best.wh)} <small>${dayLabel(best.date)}</small>` : "—");
+      const eur = days.reduce((a, d) => a + (d.eur || 0), 0);
+      tiles.innerHTML = tile("Coût total", days.length ? `${fmtEur(eur)} <small>${fmtEnergy(total)}</small>` : "—") +
+        tile("Moyenne / jour", days.length ? `${fmtEur(eur / days.length)} <small>${fmtEnergy(total / days.length)}</small>` : "—") +
+        tile("Jour max", best ? `${fmtEur(best.eur)} <small>${fmtEnergy(best.wh)} · ${dayLabel(best.date)}</small>` : "—");
       empty.hidden = days.length > 0;
       wrap.hidden = !days.length;
       if (days.length) Charts.daily(svg, data.daily, fmtEnergy);
-      table.tHead.innerHTML = "<tr><th>Jour</th><th>Énergie</th></tr>";
+      table.tHead.innerHTML = "<tr><th>Jour</th><th>Énergie</th><th>Coût</th></tr>";
       table.tBodies[0].innerHTML = days.slice().reverse()
-        .map((d) => `<tr><td>${dayLabel(d.date)}</td><td>${fmtEnergy(d.wh)}</td></tr>`).join("");
+        .map((d) => `<tr><td>${dayLabel(d.date)}</td><td>${fmtEnergy(d.wh)}</td><td>${fmtEur(d.eur)}</td></tr>`).join("");
     }
   }
 
@@ -266,6 +300,73 @@ const ChartPanel = (() => {
     },
   };
 })();
+
+/* --- Panneau tarifs ----------------------------------------------------- */
+const SettingsPanel = (() => {
+  const dlg = document.getElementById("settings-dialog");
+  const err = dlg.querySelector("#settings-error");
+  const ranges = dlg.querySelector(".ranges");
+
+  function syncTariff() {
+    const mode = dlg.querySelector("input[name=tariff]:checked").value;
+    dlg.querySelectorAll("section[data-tariff]").forEach((s) => (s.hidden = s.dataset.tariff !== mode));
+  }
+  dlg.querySelectorAll("input[name=tariff]").forEach((r) => r.addEventListener("change", syncTariff));
+
+  function addRange(start = "22:00", end = "06:00") {
+    const li = document.createElement("li");
+    li.innerHTML = `<input type="time" class="r-start" value="${start}" required><span>à</span>` +
+      `<input type="time" class="r-end" value="${end}" required>` +
+      `<button type="button" aria-label="Retirer cette plage">×</button>`;
+    li.querySelector("button").addEventListener("click", () => li.remove());
+    ranges.append(li);
+  }
+  dlg.querySelector("#range-add").addEventListener("click", () => {
+    if (ranges.children.length < 4) addRange("12:00", "14:00");
+  });
+
+  dlg.querySelector("#settings-save").addEventListener("click", async (ev) => {
+    const btn = ev.currentTarget;
+    err.hidden = true;
+    const hc = dlg.querySelector("input[name=tariff]:checked").value === "hphc";
+    const pricing = {
+      hc_enabled: hc,
+      base: Number(dlg.querySelector("#price-base").value),
+      hp: Number(dlg.querySelector("#price-hp").value),
+      hc: Number(dlg.querySelector("#price-hc").value),
+      hc_ranges: [...ranges.children].map((li) => [li.querySelector(".r-start").value, li.querySelector(".r-end").value]),
+    };
+    btn.disabled = true;
+    try {
+      await api("/api/settings", { method: "PUT", body: { pricing } });
+      dlg.close();
+      cards.forEach((c) => refreshCost(c, true));
+    } catch (e) {
+      err.textContent = e.message;
+      err.hidden = false;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  dlg.querySelectorAll(".close").forEach((b) => b.addEventListener("click", () => dlg.close()));
+
+  return {
+    async open() {
+      const { pricing } = await api("/api/settings");
+      dlg.querySelector(`input[name=tariff][value=${pricing.hc_enabled ? "hphc" : "base"}]`).checked = true;
+      dlg.querySelector("#price-base").value = pricing.base;
+      dlg.querySelector("#price-hp").value = pricing.hp;
+      dlg.querySelector("#price-hc").value = pricing.hc;
+      ranges.replaceChildren();
+      (pricing.hc_ranges.length ? pricing.hc_ranges : [["22:00", "06:00"]]).forEach(([a, b]) => addRange(a, b));
+      err.hidden = true;
+      syncTariff();
+      dlg.showModal();
+    },
+  };
+})();
+document.getElementById("settings-btn").addEventListener("click", () =>
+  SettingsPanel.open().catch((e) => alert(e.message)));
 
 setInterval(() => {
   if (!document.hidden) cards.forEach((c) => refresh(c, false));

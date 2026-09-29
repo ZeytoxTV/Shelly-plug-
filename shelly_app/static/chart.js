@@ -153,7 +153,8 @@ const Charts = (() => {
         const path = `M${x0},${y(0)}V${top + rr}Q${x0},${top} ${x0 + rr},${top}H${x0 + bw - rr}Q${x0 + bw},${top} ${x0 + bw},${top + rr}V${y(0)}Z`;
         const bar = el("path", { class: `bar${d.date === todayIso ? " dim" : ""}`, d: path }, svg);
         const show = () => tooltip(wrap, svg, x0 + bw / 2, top,
-          `${label}${d.date === todayIso ? " (en cours)" : ""} · <b>${fmtEnergy(d.wh)}</b>`);
+          `${label}${d.date === todayIso ? " (en cours)" : ""} · <b>${fmtEnergy(d.wh)}</b>` +
+          (d.eur != null && typeof fmtEur === "function" ? ` · ${fmtEur(d.eur)}` : ""));
         hitRect.addEventListener("pointerenter", show);
         hitRect.addEventListener("pointerdown", show);
         bar.style.pointerEvents = "none";

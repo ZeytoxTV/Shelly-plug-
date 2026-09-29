@@ -215,6 +215,22 @@ class ServerTests(unittest.TestCase):
         self.assertEqual((code, w["online"]), (200, False))
         self.plug, self.state = fake(2)
 
+    def test_pricing_settings_and_cost(self):
+        code, data = self.req("GET", "/api/settings")
+        self.assertEqual((code, data["pricing"]["hc_enabled"]), (200, False))
+        code, data = self.req("PUT", "/api/settings", {"pricing": {"base": 0.25}})
+        self.assertEqual((code, data["pricing"]["base"]), (200, 0.25))
+        self.assertEqual(json.loads((Path(self.tmp.name) / "settings.json").read_text())["pricing"]["base"], 0.25)
+        self.assertEqual(self.req("PUT", "/api/settings", {"pricing": {"base": 99}})[0], 400)
+
+        _, dev = self.req("POST", "/api/devices", {"host": f"127.0.0.1:{self.plug.server_port}"})
+        code, data = self.req("GET", f"/api/devices/{dev['id']}/cost")
+        self.assertEqual((code, data["today"]["eur"], data["hc_enabled"]), (200, None, False))
+        code, data = self.req("GET", f"/api/devices/{dev['id']}/history?range=7d")
+        self.assertIn("eur", data["daily"][0])
+        code, data = self.req("GET", f"/api/devices/{dev['id']}/history?range=24h")
+        self.assertIn("eur", data["energy"])
+
     def test_unreachable(self):
         self.assertEqual(self.req("POST", "/api/devices", {"host": "127.0.0.1:1"})[0], 502)
 

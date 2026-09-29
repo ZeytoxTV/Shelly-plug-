@@ -12,6 +12,7 @@ Aucune dépendance : uniquement la bibliothèque standard Python (3.8+).
 - Mesures en direct (rafraîchies toutes les 3 s) : puissance, énergie cumulée, tension, température
 - Minuterie : « allume/éteins puis inverse dans 5 min, 15 min, 1 h… »
 - **Graphique de consommation** : puissance sur 24 h, énergie par jour sur 7 et 30 jours
+- **Coût en euros** : du jour, du mois (avec estimation), par jour ; tarif unique ou heures creuses
 - **Programmation hebdomadaire** : des horaires d'allumage/extinction différents pour chaque jour
 - **Protection anti-coupure** : à l'heure d'un arrêt programmé, si l'appareil consomme encore
   (PC allumé, partie en cours…), l'arrêt est reporté jusqu'à ce qu'il soit au repos
@@ -44,6 +45,14 @@ Bouton **🗓 Programmation** sur la carte d'une prise :
 Les horaires sont appliqués par le serveur (le Pi), même si aucune page n'est ouverte ;
 ils suivent l'heure du Pi (`timedatectl` pour vérifier le fuseau). Les dernières actions automatiques
 (allumages, arrêts, reports) sont listées en bas du panneau.
+
+### Coût en euros
+
+Bouton **€** en haut de la page : indique le prix du kWh TTC de ta facture — tarif unique, ou
+heures pleines / heures creuses avec tes plages horaires (ex. 22:00 → 06:00). La carte de chaque
+prise affiche alors le coût du jour et du mois (avec une estimation de fin de mois), et le graphique
+le coût sur 24 h, par jour et au total. Les coûts sont recalculés sur tout l'historique quand
+tu changes de tarif. Les tarifs sont enregistrés dans `settings.json`.
 
 ### Graphique
 
@@ -141,6 +150,8 @@ curl -X POST http://localhost:8080/api/devices/<id>/switch \
 curl http://localhost:8080/api/devices/<id>/history?range=24h           # 24h, 7d ou 30d
 curl http://localhost:8080/api/devices/<id>/schedule                     # programmation (PUT pour modifier)
 curl http://localhost:8080/api/devices/<id>/widget                       # résumé compact (widget)
+curl http://localhost:8080/api/devices/<id>/cost                         # coût du jour et du mois
+curl http://localhost:8080/api/settings                                  # tarifs (PUT pour modifier)
 ```
 
 ## Tests

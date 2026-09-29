@@ -101,29 +101,54 @@ class History:
             )
         return points
 
-    def daily_energy(self, device_id, days=7, now=None):
-        """Énergie consommée par jour (Wh), en heure locale."""
-        now = now or time.time()
-        today = datetime.fromtimestamp(now).date()
-        first = today - timedelta(days=days - 1)
-        since = int(datetime.combine(first, datetime.min.time()).timestamp())
-        totals = {first + timedelta(days=i): 0.0 for i in range(days)}
-        has_data = set()
+    def _deltas(self, device_id, since, until=None):
+        """Énergie consommée entre deux mesures successives : (ts, Wh)."""
         prev = None
         for ts, power, energy in self._rows(device_id, since - MAX_GAP_S):
-            if prev is not None:
+            if until is not None and ts > until:
+                break
+            if prev is not None and ts >= since:
                 pts, ppower, penergy = prev
-                day = datetime.fromtimestamp(ts).date()
                 delta = None
                 if energy is not None and penergy is not None and energy >= penergy:
                     delta = energy - penergy
                 elif ppower is not None and ts - pts <= MAX_GAP_S:
                     delta = ppower * (ts - pts) / 3600
-                if delta is not None and day in totals:
-                    totals[day] += delta
-                    has_data.add(day)
+                if delta is not None:
+                    yield ts, delta
             prev = (ts, power, energy)
+
+    def daily_energy(self, device_id, days=7, now=None, off_peak=None):
+        """Énergie consommée par jour (Wh), en heure locale, dont la part en heures creuses."""
+        now = now or time.time()
+        today = datetime.fromtimestamp(now).date()
+        first = today - timedelta(days=days - 1)
+        since = int(datetime.combine(first, datetime.min.time()).timestamp())
+        totals = {first + timedelta(days=i): [0.0, 0.0] for i in range(days)}
+        has_data = set()
+        for ts, delta in self._deltas(device_id, since):
+            day = datetime.fromtimestamp(ts).date()
+            if day in totals:
+                totals[day][0] += delta
+                if off_peak and off_peak(ts):
+                    totals[day][1] += delta
+                has_data.add(day)
         return [
-            {"date": d.isoformat(), "wh": round(wh, 1) if d in has_data else None}
-            for d, wh in totals.items()
+            {
+                "date": d.isoformat(),
+                "wh": round(wh, 1) if d in has_data else None,
+                "wh_hc": round(hc, 1) if d in has_data else None,
+            }
+            for d, (wh, hc) in totals.items()
         ]
+
+    def energy_between(self, device_id, since, until=None, off_peak=None):
+        """(Wh, Wh en heures creuses) consommés sur une période ; (None, None) sans mesure."""
+        total = hc = 0.0
+        seen = False
+        for ts, delta in self._deltas(device_id, int(since), until):
+            seen = True
+            total += delta
+            if off_peak and off_peak(ts):
+                hc += delta
+        return (round(total, 1), round(hc, 1)) if seen else (None, None)

@@ -10,11 +10,13 @@ import threading
 import time
 import urllib.parse
 import uuid
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .automation import DEFAULT_SCHEDULE, Automation, next_event, normalize_schedule
 from .history import History
+from .pricing import DEFAULT_PRICING, cost, normalize_pricing, off_peak_checker
 from .shelly import CloudClient, ShellyAuthError, ShellyClient, ShellyError
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -78,6 +80,29 @@ class DeviceStore:
             return False
 
 
+class Settings:
+    """Réglages généraux (tarifs), dans settings.json à côté de devices.json."""
+
+    def __init__(self, path):
+        self.path = Path(path)
+        self.lock = threading.Lock()
+        self.data = {"pricing": dict(DEFAULT_PRICING)}
+        if self.path.exists():
+            self.data.update(json.loads(self.path.read_text(encoding="utf-8")))
+
+    @property
+    def pricing(self):
+        with self.lock:
+            return dict(self.data["pricing"])
+
+    def set_pricing(self, pricing):
+        with self.lock:
+            self.data["pricing"] = pricing
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self.data, indent=2, ensure_ascii=False), encoding="utf-8")
+            tmp.replace(self.path)
+
+
 def client_for(device):
     if device.get("mode") == "cloud":
         return CloudClient(device["server"], device["auth_key"], device["device_id"])
@@ -89,6 +114,7 @@ def client_for(device):
 class Handler(BaseHTTPRequestHandler):
     store: DeviceStore = None
     history: History = None
+    settings: Settings = None
     automation: Automation = None
     server_version = "ShellyApp/1.0"
 
@@ -135,6 +161,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parts = self._parts()
+        if parts == ["api", "settings"]:
+            return self._json(200, {"pricing": self.settings.pricing})
         if parts[:2] == ["api", "devices"]:
             if len(parts) == 2:
                 return self._json(200, self.store.public())
@@ -148,6 +176,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not device:
                     return self._json(404, {"error": "Appareil inconnu"})
                 return self._widget(device)
+            if len(parts) == 4 and parts[3] == "cost":
+                device = self.store.get(parts[2])
+                if not device:
+                    return self._json(404, {"error": "Appareil inconnu"})
+                return self._json(200, self._cost(device["id"]))
             if len(parts) == 4 and parts[3] in ("history", "schedule"):
                 device = self.store.get(parts[2])
                 if not device:
@@ -156,11 +189,21 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(200, self._schedule_payload(device))
                 query = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(self.path).query))
                 rng = query.get("range", "24h")
+                pricing = self.settings.pricing
+                off_peak = off_peak_checker(pricing)
                 if rng == "24h":
-                    return self._json(200, {"range": rng, "power": self.history.power_series(device["id"])})
+                    now = time.time()
+                    wh, wh_hc = self.history.energy_between(device["id"], now - 86400, off_peak=off_peak)
+                    return self._json(200, {
+                        "range": rng,
+                        "power": self.history.power_series(device["id"]),
+                        "energy": {"wh": wh, "wh_hc": wh_hc, "eur": cost(wh, wh_hc, pricing)},
+                    })
                 if rng in ("7d", "30d"):
-                    days = int(rng[:-1])
-                    return self._json(200, {"range": rng, "daily": self.history.daily_energy(device["id"], days)})
+                    days = self.history.daily_energy(device["id"], int(rng[:-1]), off_peak=off_peak)
+                    for d in days:
+                        d["eur"] = cost(d["wh"], d["wh_hc"], pricing)
+                    return self._json(200, {"range": rng, "daily": days})
                 return self._json(400, {"error": "range doit être 24h, 7d ou 30d"})
             return self._json(404, {"error": "Introuvable"})
         return self._static(parts)
@@ -198,6 +241,13 @@ class Handler(BaseHTTPRequestHandler):
         body = self._body()
         if body is None:
             return self._json(400, {"error": "JSON invalide"})
+        if parts == ["api", "settings"]:
+            try:
+                pricing = normalize_pricing(body.get("pricing"))
+            except ValueError as e:
+                return self._json(400, {"error": str(e)})
+            self.settings.set_pricing(pricing)
+            return self._json(200, {"pricing": pricing})
         if len(parts) == 4 and parts[:2] == ["api", "devices"] and parts[3] == "schedule":
             device = self.store.get(parts[2])
             if not device:
@@ -228,6 +278,22 @@ class Handler(BaseHTTPRequestHandler):
             next=next_event(device.get("schedule") or DEFAULT_SCHEDULE),
         )
         return self._json(200, payload)
+
+    def _cost(self, device_id, now=None):
+        """Énergie et coût d'aujourd'hui et du mois en cours."""
+        pricing = self.settings.pricing
+        off_peak = off_peak_checker(pricing)
+        now = now or time.time()
+        dt = datetime.fromtimestamp(now)
+        periods = {
+            "today": dt.replace(hour=0, minute=0, second=0, microsecond=0),
+            "month": dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0),
+        }
+        out = {"hc_enabled": pricing["hc_enabled"]}
+        for key, start in periods.items():
+            wh, wh_hc = self.history.energy_between(device_id, start.timestamp(), off_peak=off_peak)
+            out[key] = {"wh": wh, "wh_hc": wh_hc, "eur": cost(wh, wh_hc, pricing)}
+        return out
 
     def _schedule_payload(self, device):
         return {
@@ -304,8 +370,11 @@ def make_server(bind, port, config, history_db=None):
     store = DeviceStore(config)
     history = History(history_db or Path(config).with_name("history.db"))
     automation = Automation(store, history, client_for)
+    settings = Settings(Path(config).with_name("settings.json"))
     handler = type(
-        "BoundHandler", (Handler,), {"store": store, "history": history, "automation": automation}
+        "BoundHandler",
+        (Handler,),
+        {"store": store, "history": history, "automation": automation, "settings": settings},
     )
     server = ThreadingHTTPServer((bind, port), handler)
     server.automation = automation

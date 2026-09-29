@@ -4,3 +4,4 @@ devices.json
 devices.tmp
 history.db
 android/build/
+settings.json
