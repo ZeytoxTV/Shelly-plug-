@@ -19,6 +19,7 @@ Aucune dépendance : uniquement la bibliothèque standard Python (3.8+).
 - Détection automatique de la génération (Gen1 ou Gen2/Gen3)
 - Authentification supportée (Basic pour Gen1, Digest SHA-256 pour Gen2+)
 - Installable sur l'écran d'accueil du téléphone (PWA), thème clair/sombre automatique
+- **Widget Android 4×4** : état, conso, courbe 24 h, prochain horaire et bouton marche/arrêt
 
 ## Démarrage
 
@@ -49,6 +50,25 @@ ils suivent l'heure du Pi (`timedatectl` pour vérifier le fuseau). Les dernièr
 Bouton **📈 Consommation** : le serveur relève la consommation chaque minute et garde 90 jours
 d'historique (`history.db`, à côté de `devices.json`). Touche le graphique pour lire une valeur ;
 « Voir en tableau » donne les chiffres.
+
+### Widget Android 4×4
+
+Une mini-appli Android (32 Ko, sans pub ni traceur) ajoute un widget sur l'écran d'accueil :
+état de la prise, puissance, énergie du jour, courbe des dernières 24 h, prochain horaire
+(ou arrêt reporté) et un gros bouton **Allumer / Éteindre**.
+
+1. Sur le téléphone, ouvre l'appli web et touche **📱 Installer le widget Android** en bas de page
+   (ou `http://<pi>:8080/shelly-widget.apk`). Autorise l'installation depuis le navigateur.
+2. Appui long sur l'écran d'accueil → **Widgets** → **Shelly Widget** → place-le en 4×4.
+3. Vérifie l'adresse du Pi (Tailscale doit être actif sur le téléphone) et choisis la prise.
+
+Le widget se met à jour environ toutes les 15 min, après chaque appui, et avec **↻**.
+Toucher la courbe ouvre l'appli web. Si l'appareil consomme plus de 30 W, **Éteindre** demande
+un second appui dans les 5 s, pour ne pas couper le PC par erreur.
+
+Pour recompiler l'APK : `ANDROID_HOME=/chemin/sdk ./android/build.sh` (build-tools 34, sans Gradle).
+La clé de signature `android/shelly-widget.keystore` est versionnée pour que les nouvelles
+versions s'installent par-dessus l'ancienne.
 
 ### Piloter à distance (mode Cloud)
 
@@ -118,6 +138,7 @@ curl -X POST http://localhost:8080/api/devices/<id>/switch \
      -H 'Content-Type: application/json' -d '{"action":"on","timer":600}' # on / off / toggle
 curl http://localhost:8080/api/devices/<id>/history?range=24h           # 24h, 7d ou 30d
 curl http://localhost:8080/api/devices/<id>/schedule                     # programmation (PUT pour modifier)
+curl http://localhost:8080/api/devices/<id>/widget                       # résumé compact (widget)
 ```
 
 ## Tests

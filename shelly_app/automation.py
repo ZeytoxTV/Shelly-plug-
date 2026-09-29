@@ -230,3 +230,27 @@ class Automation:
 
     def stop(self):
         self._stop.set()
+
+
+def next_event(schedule, now=None):
+    """Prochaine action programmée : {"time", "action", "day", "in_days"} ou None."""
+    if not schedule or not schedule.get("enabled") or not schedule.get("rules"):
+        return None
+    dt = datetime.fromtimestamp(now or time.time())
+    minute_now = dt.hour * 60 + dt.minute
+    best = None
+    for offset in range(8):
+        day = (dt.weekday() + offset) % 7
+        for r in schedule["rules"]:
+            if day not in r["days"]:
+                continue
+            h, m = map(int, r["time"].split(":"))
+            minutes = h * 60 + m
+            if offset == 0 and minutes <= minute_now:
+                continue
+            key = (offset, minutes)
+            if best is None or key < best[0]:
+                best = (key, {"time": r["time"], "action": r["action"], "day": DAY_NAMES[day], "in_days": offset})
+        if best:
+            return best[1]
+    return None

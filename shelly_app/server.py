@@ -13,7 +13,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .automation import DEFAULT_SCHEDULE, Automation, normalize_schedule
+from .automation import DEFAULT_SCHEDULE, Automation, next_event, normalize_schedule
 from .history import History
 from .shelly import CloudClient, ShellyAuthError, ShellyClient, ShellyError
 
@@ -143,6 +143,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not device:
                     return self._json(404, {"error": "Appareil inconnu"})
                 return self._device_call(device, lambda c: c.status())
+            if len(parts) == 4 and parts[3] == "widget":
+                device = self.store.get(parts[2])
+                if not device:
+                    return self._json(404, {"error": "Appareil inconnu"})
+                return self._widget(device)
             if len(parts) == 4 and parts[3] in ("history", "schedule"):
                 device = self.store.get(parts[2])
                 if not device:
@@ -205,6 +210,25 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, self._schedule_payload(device))
         return self._json(404, {"error": "Introuvable"})
 
+    def _widget(self, device):
+        """Résumé compact pour le widget Android : un seul appel par rafraîchissement."""
+        payload = {"id": device["id"], "name": device.get("name"), "online": True, "error": None}
+        try:
+            status = client_for(device).status()
+            self.automation.observe(device["id"], status)
+            payload.update(on=status.get("on"), power=status.get("power"))
+        except ShellyError as e:
+            payload.update(online=False, error=str(e), on=None, power=None)
+        today = self.history.daily_energy(device["id"], 1)[0]["wh"]
+        spark = self.history.power_series(device["id"], hours=24, bucket_s=1800)
+        payload.update(
+            today_wh=today,
+            spark=[p["avg"] for p in spark],
+            pending=self.automation.state(device["id"]),
+            next=next_event(device.get("schedule") or DEFAULT_SCHEDULE),
+        )
+        return self._json(200, payload)
+
     def _schedule_payload(self, device):
         return {
             "schedule": device.get("schedule") or DEFAULT_SCHEDULE,
@@ -266,6 +290,8 @@ class Handler(BaseHTTPRequestHandler):
         ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         if path.suffix == ".webmanifest":
             ctype = "application/manifest+json"
+        elif path.suffix == ".apk":
+            ctype = "application/vnd.android.package-archive"
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))

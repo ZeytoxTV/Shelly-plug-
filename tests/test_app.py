@@ -201,6 +201,20 @@ class ServerTests(unittest.TestCase):
         self.assertEqual((code, len(data["daily"])), (200, 7))
         self.assertEqual(self.req("GET", f"/api/devices/{dev['id']}/history?range=1y")[0], 400)
 
+    def test_widget_route(self):
+        _, dev = self.req("POST", "/api/devices", {"host": f"127.0.0.1:{self.plug.server_port}"})
+        sched = {"rules": [{"id": "x", "time": "23:30", "days": list(range(7)), "action": "off"}]}
+        self.req("PUT", f"/api/devices/{dev['id']}/schedule", sched)
+        code, w = self.req("GET", f"/api/devices/{dev['id']}/widget")
+        self.assertEqual(code, 200)
+        self.assertEqual((w["name"], w["on"], w["power"], w["online"]), ("Salon", False, 42.0, True))
+        self.assertEqual(w["next"]["time"], "23:30")
+        self.assertEqual(len(w["spark"]), 49)
+        self.plug.shutdown(); self.plug.server_close()
+        code, w = self.req("GET", f"/api/devices/{dev['id']}/widget")
+        self.assertEqual((code, w["online"]), (200, False))
+        self.plug, self.state = fake(2)
+
     def test_unreachable(self):
         self.assertEqual(self.req("POST", "/api/devices", {"host": "127.0.0.1:1"})[0], 502)
 

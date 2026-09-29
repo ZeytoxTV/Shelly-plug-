@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 
-from shelly_app.automation import Automation, normalize_schedule
+from shelly_app.automation import Automation, next_event, normalize_schedule
 from shelly_app.history import History
 from shelly_app.shelly import ShellyError
 
@@ -169,6 +169,17 @@ class AutomationTests(unittest.TestCase):
         self.assertIsNone(daily[0]["wh"])
         series = self.history.power_series("d1", now=now)
         self.assertEqual(max(p["avg"] or 0 for p in series), 120)
+
+    def test_next_event(self):
+        sched = schedule([
+            {"id": "a", "time": "23:30", "days": [0], "action": "off"},  # lundi
+            {"id": "b", "time": "08:00", "days": [2], "action": "on"},  # mercredi
+        ])
+        ev = next_event(sched, MONDAY.replace(hour=12).timestamp())
+        self.assertEqual((ev["time"], ev["day"], ev["in_days"]), ("23:30", "lundi", 0))
+        ev = next_event(sched, MONDAY.replace(hour=23, minute=45).timestamp())
+        self.assertEqual((ev["time"], ev["day"], ev["in_days"]), ("08:00", "mercredi", 2))
+        self.assertIsNone(next_event(schedule([]), MONDAY.timestamp()))
 
     def test_normalize_rejects_bad_input(self):
         for bad in (
