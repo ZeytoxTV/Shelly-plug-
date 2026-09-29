@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Shelly Widget</string>
-    <string name="widget_name">Prise Shelly</string>
+    <string name="widget_name">Prise Shelly (4×4)</string>
     <string name="widget_desc">Allume, éteins et suis la conso de ta prise</string>
+    <string name="widget_name_small">Prise Shelly (2×2)</string>
+    <string name="widget_desc_small">Version compacte : puissance et bouton marche/arrêt</string>
 </resources>

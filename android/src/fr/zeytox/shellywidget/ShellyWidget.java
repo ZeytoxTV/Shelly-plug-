@@ -43,6 +43,7 @@ public class ShellyWidget extends AppWidgetProvider {
 
     @Override
     public void onDisabled(Context ctx) {
+        if (allIds(ctx).length > 0) return; // l'autre taille de widget est encore présente
         AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
         am.cancel(broadcast(ctx, ACTION_REFRESH_ALL, 0));
     }
@@ -85,8 +86,10 @@ public class ShellyWidget extends AppWidgetProvider {
         // Éteindre un appareil en train de consommer : demande confirmation
         if (known && wasOn && power >= CONFIRM_ABOVE_W && now > p.getLong("confirm_" + id, 0)) {
             p.edit().putLong("confirm_" + id, now + CONFIRM_WINDOW_MS).apply();
-            RemoteViews v = new RemoteViews(ctx.getPackageName(), R.layout.widget);
-            v.setTextViewText(R.id.toggle, "Appuie encore pour couper (" + Math.round(power) + " W)");
+            RemoteViews v = new RemoteViews(ctx.getPackageName(), layoutFor(ctx, id));
+            v.setTextViewText(R.id.toggle, layoutFor(ctx, id) == R.layout.widget
+                    ? "Appuie encore pour couper (" + Math.round(power) + " W)"
+                    : "Couper ? " + Math.round(power) + " W");
             v.setInt(R.id.toggle, "setBackgroundResource", R.drawable.btn_warn);
             AppWidgetManager.getInstance(ctx).partiallyUpdateAppWidget(id, v);
             // Sans 2e appui, le bouton revient à la normale après le délai
@@ -197,9 +200,11 @@ public class ShellyWidget extends AppWidgetProvider {
     }
 
     private static RemoteViews baseViews(Context ctx, int id) {
-        RemoteViews v = new RemoteViews(ctx.getPackageName(), R.layout.widget);
+        RemoteViews v = new RemoteViews(ctx.getPackageName(), layoutFor(ctx, id));
         v.setOnClickPendingIntent(R.id.toggle, broadcastFor(ctx, ACTION_TOGGLE, id));
+        // 4×4 : bouton ↻ ; 2×2 : toucher le nom rafraîchit
         v.setOnClickPendingIntent(R.id.refresh, broadcastFor(ctx, ACTION_REFRESH, id));
+        v.setOnClickPendingIntent(R.id.header, broadcastFor(ctx, ACTION_REFRESH, id));
         Intent open = new Intent(Intent.ACTION_VIEW, Uri.parse(Api.server(ctx) + "/"));
         v.setOnClickPendingIntent(R.id.chart, PendingIntent.getActivity(ctx, id, open,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
@@ -207,15 +212,17 @@ public class ShellyWidget extends AppWidgetProvider {
     }
 
     private static void showBusy(Context ctx, int id, String label) {
-        RemoteViews v = new RemoteViews(ctx.getPackageName(), R.layout.widget);
+        int layout = layoutFor(ctx, id);
+        RemoteViews v = new RemoteViews(ctx.getPackageName(), layout);
         if (label != null) v.setTextViewText(R.id.toggle, label);
-        v.setTextViewText(R.id.refresh, "…");
+        if (layout == R.layout.widget) v.setTextViewText(R.id.refresh, "…");
+        else v.setTextViewText(R.id.sub, "Mise à jour…");
         AppWidgetManager.getInstance(ctx).partiallyUpdateAppWidget(id, v);
     }
 
     private static void showError(Context ctx, int id, String message) {
-        RemoteViews v = new RemoteViews(ctx.getPackageName(), R.layout.widget);
-        v.setTextViewText(R.id.info, "⚠ " + (message == null ? "Erreur" : message));
+        RemoteViews v = new RemoteViews(ctx.getPackageName(), layoutFor(ctx, id));
+        v.setTextViewText(layoutFor(ctx, id) == R.layout.widget ? R.id.info : R.id.sub, "⚠ " + (message == null ? "Erreur" : message));
         AppWidgetManager.getInstance(ctx).partiallyUpdateAppWidget(id, v);
     }
 
@@ -226,8 +233,24 @@ public class ShellyWidget extends AppWidgetProvider {
 
     // --- Intents & alarme ------------------------------------------------
 
+    /** Le widget 2×2 (ShellyWidgetSmall) utilise la mise en page compacte. */
+    static int layoutFor(Context ctx, int id) {
+        android.appwidget.AppWidgetProviderInfo info = AppWidgetManager.getInstance(ctx).getAppWidgetInfo(id);
+        if (info != null && info.provider != null
+                && ShellyWidgetSmall.class.getName().equals(info.provider.getClassName())) {
+            return R.layout.widget_small;
+        }
+        return R.layout.widget;
+    }
+
     static int[] allIds(Context ctx) {
-        return AppWidgetManager.getInstance(ctx).getAppWidgetIds(new ComponentName(ctx, ShellyWidget.class));
+        AppWidgetManager mgr = AppWidgetManager.getInstance(ctx);
+        int[] big = mgr.getAppWidgetIds(new ComponentName(ctx, ShellyWidget.class));
+        int[] small = mgr.getAppWidgetIds(new ComponentName(ctx, ShellyWidgetSmall.class));
+        int[] all = new int[big.length + small.length];
+        System.arraycopy(big, 0, all, 0, big.length);
+        System.arraycopy(small, 0, all, big.length, small.length);
+        return all;
     }
 
     private static PendingIntent broadcastFor(Context ctx, String action, int id) {
