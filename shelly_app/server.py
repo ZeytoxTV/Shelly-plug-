@@ -17,12 +17,12 @@ from pathlib import Path
 from .automation import DEFAULT_SCHEDULE, Automation, next_event, normalize_schedule
 from .history import History
 from .pricing import DEFAULT_PRICING, normalize_pricing, price_function
-from .shelly import CloudClient, ShellyAuthError, ShellyClient, ShellyError
+from .shelly import CloudClient, HybridClient, ShellyAuthError, ShellyClient, ShellyError
 
 STATIC_DIR = Path(__file__).parent / "static"
 # Change à chaque démarrage : la page se recharge d'elle-même après une mise à jour.
 APP_VERSION = str(int(time.time()))
-PUBLIC_FIELDS = ("id", "name", "host", "model", "gen", "mode", "device_id")
+PUBLIC_FIELDS = ("id", "name", "host", "model", "gen", "mode", "device_id", "local_host")
 
 
 class DeviceStore:
@@ -109,7 +109,10 @@ class Settings:
 
 def client_for(device):
     if device.get("mode") == "cloud":
-        return CloudClient(device["server"], device["auth_key"], device["device_id"])
+        cloud = CloudClient(device["server"], device["auth_key"], device["device_id"])
+        if device.get("local_host"):
+            return HybridClient(cloud, device["local_host"], device["id"])
+        return cloud
     return ShellyClient(
         device["host"], device.get("username"), device.get("password"), device.get("gen")
     )

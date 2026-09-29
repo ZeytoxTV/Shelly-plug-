@@ -27,7 +27,8 @@ def _parse_digest_challenge(header):
 
 
 class ShellyClient:
-    def __init__(self, host, username=None, password=None, gen=None):
+    def __init__(self, host, username=None, password=None, gen=None, timeout=TIMEOUT):
+        self.timeout = timeout
         host = host.strip().rstrip("/")
         if not host.startswith(("http://", "https://")):
             host = "http://" + host
@@ -42,7 +43,7 @@ class ShellyClient:
         req = urllib.request.Request(self.base + path)
         if auth_header:
             req.add_header("Authorization", auth_header)
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
             return json.loads(resp.read().decode("utf-8") or "null")
 
     def _digest_header(self, challenge, path):
@@ -262,9 +263,11 @@ class CloudClient:
         if not st.get("online"):
             raise ShellyError("La prise est hors ligne (pas connectée au cloud)")
         s = st.get("status") or {}
+        local_ip = (s.get("wifi_sta") or {}).get("ip") or (s.get("wifi") or {}).get("sta_ip")
         if "switch:0" in s:
             sw = s["switch:0"]
             return {
+                "local_ip": local_ip,
                 "on": bool(sw.get("output")),
                 "power": sw.get("apower"),
                 "voltage": sw.get("voltage"),
@@ -280,6 +283,7 @@ class CloudClient:
         if temp is None:
             temp = (s.get("tmp") or {}).get("tC")
         return {
+            "local_ip": local_ip,
             "on": bool(relay.get("ison")),
             "power": meter.get("power"),
             "voltage": None,
@@ -303,3 +307,51 @@ class CloudClient:
         self._post("/v2/devices/api/set/switch", payload)
         # Pas de relecture immédiate (limite de débit) : on renvoie l'état demandé.
         return {"on": on, "timer_remaining": timer or None, "partial": True}
+
+
+def same_device(mac, device_id):
+    """Compare une adresse MAC (\"08:3A:8D:C1:7E:F5\" ou \"083A8DC17EF5\") à un identifiant cloud."""
+    norm = lambda v: re.sub(r"[^0-9a-f]", "", str(v or "").lower())
+    return bool(norm(mac)) and norm(mac) == norm(device_id)
+
+
+class HybridClient:
+    """Prise ajoutée via le cloud, lue en direct sur le Wi-Fi quand c'est possible.
+
+    Le réseau local est interrogé en premier (rapide, sans limite de débit) ; s'il ne répond
+    pas, on passe par le cloud et on ne réessaie le local qu'après une pause.
+    """
+
+    LOCAL_TIMEOUT = 2.5
+    BACKOFF_S = 60
+    _local_down_until = {}  # device_id -> horodatage : partagé entre les requêtes
+
+    def __init__(self, cloud, local_host, device_id):
+        self.cloud = cloud
+        self.device_id = device_id
+        self.local = ShellyClient(local_host, timeout=self.LOCAL_TIMEOUT)
+
+    def _local_ok(self):
+        return time.time() >= self._local_down_until.get(self.device_id, 0)
+
+    def _local_failed(self):
+        HybridClient._local_down_until[self.device_id] = time.time() + self.BACKOFF_S
+
+    def info(self):
+        return self.cloud.info()
+
+    def status(self):
+        if self._local_ok():
+            try:
+                return {**self.local.status(), "via": "local"}
+            except ShellyError:
+                self._local_failed()
+        return {**self.cloud.status(), "via": "cloud"}
+
+    def switch(self, action, timer=None):
+        if self._local_ok():
+            try:
+                return {**self.local.switch(action, timer), "via": "local"}
+            except ShellyError:
+                self._local_failed()
+        return {**self.cloud.switch(action, timer), "via": "cloud"}

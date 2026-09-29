@@ -65,6 +65,14 @@ function render(card, status) {
   pending.hidden = !pendingText;
   if (status.partial) return;
   card.status = status;
+  if (status.via) {
+    const d = card.device;
+    el.querySelector(".meta").textContent = [
+      d.mode === "cloud" ? "Cloud Shelly" : d.host,
+      d.model,
+      status.via === "local" ? "lu en direct (Wi‑Fi)" : "lu via le cloud",
+    ].filter(Boolean).join(" · ");
+  }
   const pw = el.querySelector(".power-w");
   pw.textContent = fmt(status.power, "W");
   if (status.stale) {

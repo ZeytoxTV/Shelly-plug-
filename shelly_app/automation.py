@@ -13,7 +13,7 @@ import threading
 import time
 from datetime import datetime
 
-from .shelly import ShellyError
+from .shelly import ShellyClient, ShellyError, same_device
 
 SAMPLE_EVERY_S = 60
 # Âge max d'un état partagé entre la page, le widget et les relevés : le cloud Shelly
@@ -21,6 +21,8 @@ SAMPLE_EVERY_S = 60
 CACHE_S = {"cloud": 8, "local": 2}
 # En cas d'échec (cloud saturé, coupure Wi-Fi brève), on affiche la dernière valeur connue
 STALE_MAX_S = 300
+# Prise ajoutée via le cloud : on recherche son adresse locale au plus toutes les 10 min
+DISCOVERY_EVERY_S = 600
 TICK_S = 15
 CATCH_UP_MIN = 5  # une règle ratée de peu (redémarrage, requête lente) est encore appliquée
 DAY_NAMES = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
@@ -87,6 +89,7 @@ class Automation:
         self.fired = set()  # clés "rule:date:heure" déjà appliquées
         self.pending = {}  # device_id -> {"since", "low_since", "rule_time"}
         self.fetch_locks = {}  # device_id -> Lock : une seule lecture à la fois par prise
+        self.discovery_at = {}  # device_id -> dernier essai de connexion locale
         self._stop = threading.Event()
 
     # --- Relevés -----------------------------------------------------------
@@ -120,7 +123,9 @@ class Automation:
         """
         dev_id = device["id"]
         if max_age is None:
-            max_age = CACHE_S.get(device.get("mode") or "local", 2)
+            # Prise cloud lue en local : même fraîcheur qu'une prise locale
+            mode = "local" if device.get("local_host") else (device.get("mode") or "local")
+            max_age = CACHE_S.get(mode, 2)
         with self.lock:
             fetch_lock = self.fetch_locks.setdefault(dev_id, threading.Lock())
         with fetch_lock:
@@ -136,7 +141,31 @@ class Automation:
                     return {**cached[1], "stale": True, "stale_age": int(age)}
                 raise
             self.observe(dev_id, status)
+            self._maybe_discover_local(device, status)
             return dict(status)
+
+    def _maybe_discover_local(self, device, status):
+        """Prise cloud : si le cloud donne une IP locale, vérifie que c'est bien elle et l'utilise."""
+        ip = status.get("local_ip")
+        if device.get("mode") != "cloud" or not ip or status.get("via") == "local":
+            return
+        if ip == device.get("local_host") or not hasattr(self.store, "update"):
+            return
+        now = self.clock()
+        if now - self.discovery_at.get(device["id"], 0) < DISCOVERY_EVERY_S:
+            return
+        self.discovery_at[device["id"]] = now
+
+        def probe():
+            try:
+                info = ShellyClient(ip, timeout=2.5).get("/shelly")
+            except ShellyError:
+                return
+            if same_device(info.get("mac"), device.get("device_id")):
+                self.store.update(device["id"], local_host=ip)
+                self.history.add_event(device["id"], f"Connexion locale activée ({ip}) : le cloud sert de secours")
+
+        threading.Thread(target=probe, daemon=True).start()
 
     def _fresh_status(self, device, max_age=0):
         return self.get_status(device, max_age=max_age, allow_stale=False)
@@ -245,6 +274,7 @@ class Automation:
 
     def forget(self, device_id):
         self.pending.pop(device_id, None)
+        self.discovery_at.pop(device_id, None)
         with self.lock:
             self.latest.pop(device_id, None)
             self.last_sample.pop(device_id, None)

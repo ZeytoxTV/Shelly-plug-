@@ -59,7 +59,7 @@ class FakeShelly(BaseHTTPRequestHandler):
             )
         if url.path == "/shelly":
             if self.gen == 1:
-                return self._send({"type": "SHPLG-S", "mac": "AA", "auth": False})
+                return self._send({"type": "SHPLG-S", "mac": getattr(self, "mac", "AA"), "auth": False})
             return self._send({"gen": 2, "model": "SNPL-00112EU", "name": "Salon", "mac": "BB", "auth_en": bool(self.password)})
         if self.gen == 1:
             if url.path == "/settings":
@@ -286,7 +286,8 @@ class FakeCloud(BaseHTTPRequestHandler):
                 return self._send([])
             return self._send([{
                 "id": "083a8dc17ef5", "type": "relay", "code": "SHPLG-S", "gen": "G1", "online": 1,
-                "status": {"relays": [{"ison": s["on"], "has_timer": False}], "meters": [{"power": 80.0, "total": 6000}], "temperature": 28.0},
+                "status": {"relays": [{"ison": s["on"], "has_timer": False}], "meters": [{"power": 80.0, "total": 6000}],
+                           "temperature": 28.0, "wifi_sta": {"ip": s.get("local_ip")}},
                 "settings": {"name": "PC THOMAS"},
             }])
         if url.path == "/v2/devices/api/set/switch":
@@ -342,3 +343,66 @@ class CloudTests(unittest.TestCase):
             self.assertTrue(req("POST", f"/api/devices/{dev['id']}/switch", {"action": "on"})["on"])
             self.assertTrue(req("GET", f"/api/devices/{dev['id']}/status")["on"])
             app.shutdown(); app.server_close()
+
+
+class HybridTests(unittest.TestCase):
+    """Prise ajoutée via le cloud : l'appli trouve son IP locale et la lit en direct."""
+
+    def test_cloud_device_switches_to_local_and_falls_back(self):
+        local_cls = type("L", (FakeShelly,), {"gen": 1, "mac": "08:3A:8D:C1:7E:F5", "state": {"on": True, "timer": None}})
+        local = start(local_cls)
+        cloud_cls = type("C", (FakeCloud,), {"state": {"on": True, "timer": None, "local_ip": f"127.0.0.1:{local.server_port}"}})
+        cloud = start(cloud_cls)
+        with tempfile.TemporaryDirectory() as tmp:
+            app = make_server("127.0.0.1", 0, Path(tmp) / "d.json")
+            threading.Thread(target=app.serve_forever, daemon=True).start()
+            base = f"http://127.0.0.1:{app.server_port}"
+
+            def req(method, path, body=None):
+                r = urllib.request.Request(base + path, data=json.dumps(body).encode() if body else None,
+                                           method=method, headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(r) as resp:
+                    return json.loads(resp.read())
+
+            dev = req("POST", "/api/devices", {"mode": "cloud", "server": f"http://127.0.0.1:{cloud.server_port}",
+                                               "auth_key": "KEY", "device_id": "083a8dc17ef5"})
+            first = req("GET", f"/api/devices/{dev['id']}/status")
+            self.assertNotEqual(first.get("via"), "local")  # 1re lecture : cloud, puis recherche locale
+            import time
+            for _ in range(50):
+                if req("GET", "/api/devices")[0].get("local_host"):
+                    break
+                time.sleep(0.1)
+            self.assertEqual(req("GET", "/api/devices")[0]["local_host"], f"127.0.0.1:{local.server_port}")
+            app.RequestHandlerClass.automation.latest.clear()
+            st = req("GET", f"/api/devices/{dev['id']}/status")
+            self.assertEqual((st["via"], st["power"]), ("local", 12.5))
+            self.assertTrue(req("POST", f"/api/devices/{dev['id']}/switch", {"action": "off"})["on"] is False)
+            self.assertFalse(local_cls.state["on"])  # commande passée en local
+
+            local.shutdown(); local.server_close()  # coupure du Wi-Fi local : secours cloud
+            app.RequestHandlerClass.automation.latest.clear()
+            st = req("GET", f"/api/devices/{dev['id']}/status")
+            self.assertEqual((st["via"], st["power"]), ("cloud", 80.0))
+            app.shutdown(); app.server_close()
+        cloud.shutdown(); cloud.server_close()
+
+    def test_wrong_device_on_local_ip_is_ignored(self):
+        other = start(type("L", (FakeShelly,), {"gen": 1, "mac": "FFFFFFFFFFFF", "state": {"on": True}}))
+        cloud = start(type("C", (FakeCloud,), {"state": {"on": True, "timer": None, "local_ip": f"127.0.0.1:{other.server_port}"}}))
+        with tempfile.TemporaryDirectory() as tmp:
+            app = make_server("127.0.0.1", 0, Path(tmp) / "d.json")
+            threading.Thread(target=app.serve_forever, daemon=True).start()
+            base = f"http://127.0.0.1:{app.server_port}"
+            r = urllib.request.Request(base + "/api/devices", method="POST", headers={"Content-Type": "application/json"},
+                                       data=json.dumps({"mode": "cloud", "server": f"http://127.0.0.1:{cloud.server_port}",
+                                                        "auth_key": "KEY", "device_id": "083a8dc17ef5"}).encode())
+            dev = json.loads(urllib.request.urlopen(r).read())
+            urllib.request.urlopen(base + f"/api/devices/{dev['id']}/status").read()
+            import time
+            time.sleep(1)
+            devices = json.loads(urllib.request.urlopen(base + "/api/devices").read())
+            self.assertIsNone(devices[0].get("local_host"))
+            app.shutdown(); app.server_close()
+        other.shutdown(); other.server_close()
+        cloud.shutdown(); cloud.server_close()
