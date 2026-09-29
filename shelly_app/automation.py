@@ -16,6 +16,11 @@ from datetime import datetime
 from .shelly import ShellyError
 
 SAMPLE_EVERY_S = 60
+# Âge max d'un état partagé entre la page, le widget et les relevés : le cloud Shelly
+# n'accepte qu'une requête par seconde, une prise locale répond vite.
+CACHE_S = {"cloud": 8, "local": 2}
+# En cas d'échec (cloud saturé, coupure Wi-Fi brève), on affiche la dernière valeur connue
+STALE_MAX_S = 300
 TICK_S = 15
 CATCH_UP_MIN = 5  # une règle ratée de peu (redémarrage, requête lente) est encore appliquée
 DAY_NAMES = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
@@ -81,13 +86,21 @@ class Automation:
         self.last_sample = {}  # device_id -> ts
         self.fired = set()  # clés "rule:date:heure" déjà appliquées
         self.pending = {}  # device_id -> {"since", "low_since", "rule_time"}
+        self.fetch_locks = {}  # device_id -> Lock : une seule lecture à la fois par prise
         self._stop = threading.Event()
 
     # --- Relevés -----------------------------------------------------------
 
     def observe(self, device_id, status):
         """Mémorise un état complet ; en garde une mesure par minute dans l'historique."""
+        if status.get("stale"):
+            return
         if status.get("partial"):
+            # Réponse du cloud après une commande : on met juste à jour marche/arrêt
+            with self.lock:
+                cached = self.latest.get(device_id)
+                if cached:
+                    self.latest[device_id] = (cached[0], {**cached[1], "on": status.get("on")})
             return
         now = self.clock()
         with self.lock:
@@ -98,14 +111,35 @@ class Automation:
         if due:
             self.history.add_sample(device_id, status, now)
 
-    def _fresh_status(self, device, max_age=0):
+    def get_status(self, device, max_age=None, allow_stale=True):
+        """État de la prise, partagé entre tous les demandeurs.
+
+        Une seule lecture à la fois par prise ; un état assez récent est réutilisé. Si la prise
+        (ou le cloud) ne répond pas, renvoie le dernier état connu marqué "stale" plutôt qu'une
+        erreur — sauf pour les décisions automatiques (allow_stale=False).
+        """
+        dev_id = device["id"]
+        if max_age is None:
+            max_age = CACHE_S.get(device.get("mode") or "local", 2)
         with self.lock:
-            cached = self.latest.get(device["id"])
-        if cached and self.clock() - cached[0] <= max_age:
-            return cached[1]
-        status = self.client_for(device).status()
-        self.observe(device["id"], status)
-        return status
+            fetch_lock = self.fetch_locks.setdefault(dev_id, threading.Lock())
+        with fetch_lock:
+            with self.lock:
+                cached = self.latest.get(dev_id)
+            if cached and self.clock() - cached[0] <= max_age:
+                return dict(cached[1])
+            try:
+                status = self.client_for(device).status()
+            except ShellyError:
+                age = self.clock() - cached[0] if cached else None
+                if allow_stale and cached and age <= STALE_MAX_S:
+                    return {**cached[1], "stale": True, "stale_age": int(age)}
+                raise
+            self.observe(dev_id, status)
+            return dict(status)
+
+    def _fresh_status(self, device, max_age=0):
+        return self.get_status(device, max_age=max_age, allow_stale=False)
 
     # --- Boucle -------------------------------------------------------------
 

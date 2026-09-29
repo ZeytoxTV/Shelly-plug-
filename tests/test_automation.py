@@ -181,6 +181,26 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual((ev["time"], ev["day"], ev["in_days"]), ("08:00", "mercredi", 2))
         self.assertIsNone(next_event(schedule([]), MONDAY.timestamp()))
 
+    def test_status_is_shared_and_falls_back_to_last_value(self):
+        a = self.make(schedule([]), MONDAY.replace(hour=10))
+        calls = []
+        orig = self.plug.status
+        self.plug.status = lambda: (calls.append(1), orig())[1]
+        dev = {"id": "d1", "mode": "cloud"}
+        a.get_status(dev)
+        a.get_status(dev)  # page + widget au même moment : une seule requête au cloud
+        self.assertEqual(len(calls), 1)
+        self.clock.t += 10
+        self.plug.offline = True  # cloud saturé
+        st = a.get_status(dev)
+        self.assertTrue(st["stale"])
+        self.assertEqual(st["stale_age"], 10)
+        with self.assertRaises(ShellyError):  # jamais de décision automatique sur une vieille valeur
+            a.get_status(dev, allow_stale=False)
+        self.clock.t += 400
+        with self.assertRaises(ShellyError):  # trop vieux : on affiche l'erreur
+            a.get_status(dev)
+
     def test_normalize_rejects_bad_input(self):
         for bad in (
             {"rules": [{"time": "25:00", "days": [0], "action": "on"}]},

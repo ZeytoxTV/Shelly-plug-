@@ -203,6 +203,16 @@ class CloudClient:
         self.device_id = device_id.strip().lower()
 
     def _post(self, path, payload):
+        """Requête au cloud ; en cas de saturation (1 requête/s), réessaie une fois."""
+        try:
+            return self._post_once(path, payload)
+        except ShellyError as e:
+            if "Trop de requêtes" not in str(e):
+                raise
+            time.sleep(1.2)
+            return self._post_once(path, payload)
+
+    def _post_once(self, path, payload):
         url = f"{self.base}{path}?" + urllib.parse.urlencode({"auth_key": self.auth_key})
         req = urllib.request.Request(
             url,

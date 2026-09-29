@@ -65,7 +65,14 @@ function render(card, status) {
   pending.hidden = !pendingText;
   if (status.partial) return;
   card.status = status;
-  el.querySelector(".power-w").textContent = fmt(status.power, "W");
+  const pw = el.querySelector(".power-w");
+  pw.textContent = fmt(status.power, "W");
+  if (status.stale) {
+    // Le cloud ou la prise n'a pas répondu : dernière valeur connue
+    const s = document.createElement("small");
+    s.textContent = `il y a ${status.stale_age} s`;
+    pw.append(s);
+  }
   el.querySelector(".energy").textContent = fmtEnergy(status.energy_wh);
   el.querySelector(".voltage").textContent = fmt(status.voltage, "V", 0);
   el.querySelector(".temp").textContent = fmt(status.temperature, "°C");

@@ -174,7 +174,14 @@ class Handler(BaseHTTPRequestHandler):
                 device = self.store.get(parts[2])
                 if not device:
                     return self._json(404, {"error": "Appareil inconnu"})
-                return self._device_call(device, lambda c: c.status())
+                try:
+                    status = self.automation.get_status(device)
+                except ShellyAuthError as e:
+                    return self._json(401, {"error": str(e)})
+                except ShellyError as e:
+                    return self._json(502, {"error": str(e)})
+                status["automation"] = self.automation.state(device["id"])
+                return self._json(200, status)
             if len(parts) == 4 and parts[3] == "widget":
                 device = self.store.get(parts[2])
                 if not device:
@@ -264,9 +271,8 @@ class Handler(BaseHTTPRequestHandler):
         """Résumé compact pour le widget Android : un seul appel par rafraîchissement."""
         payload = {"id": device["id"], "name": device.get("name"), "online": True, "error": None}
         try:
-            status = client_for(device).status()
-            self.automation.observe(device["id"], status)
-            payload.update(on=status.get("on"), power=status.get("power"))
+            status = self.automation.get_status(device)
+            payload.update(on=status.get("on"), power=status.get("power"), stale=bool(status.get("stale")))
         except ShellyError as e:
             payload.update(online=False, error=str(e), on=None, power=None)
         today = self.history.daily_energy(device["id"], 1)[0]["wh"]

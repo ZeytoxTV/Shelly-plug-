@@ -211,8 +211,14 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(w["next"]["time"], "23:30")
         self.assertEqual(len(w["spark"]), 49)
         self.plug.shutdown(); self.plug.server_close()
+        # Prise injoignable : dernière valeur connue, marquée comme ancienne
+        self.app.RequestHandlerClass.automation.latest[dev["id"]] = (0, {"on": True, "power": 1})
         code, w = self.req("GET", f"/api/devices/{dev['id']}/widget")
         self.assertEqual((code, w["online"]), (200, False))
+        import time as _t
+        self.app.RequestHandlerClass.automation.latest[dev["id"]] = (_t.time() - 30, {"on": True, "power": 5})
+        code, w = self.req("GET", f"/api/devices/{dev['id']}/widget")
+        self.assertEqual((code, w["online"], w["stale"], w["power"]), (200, True, True, 5))
         self.plug, self.state = fake(2)
 
     def test_pricing_settings_and_cost(self):
