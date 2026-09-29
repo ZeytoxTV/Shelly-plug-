@@ -172,6 +172,8 @@ class Handler(BaseHTTPRequestHandler):
             fields = {k: (body.get(k) or "").strip() for k in ("server", "auth_key", "device_id")}
             if not all(fields.values()):
                 return self._json(400, {"error": "Serveur, clé cloud et identifiant requis"})
+            if "xx" in fields["server"].lower():
+                return self._json(400, {"error": "Remplace « XX » par le numéro de ton serveur (affiché avec la clé dans l'appli Shelly)"})
             client = CloudClient(**fields)
             device = {"mode": "cloud", **fields, "device_id": client.device_id, "host": "Cloud Shelly"}
         else:

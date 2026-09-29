@@ -266,6 +266,12 @@ class CloudTests(unittest.TestCase):
                 with urllib.request.urlopen(r) as resp:
                     return json.loads(resp.read())
 
+            bad = urllib.request.Request(base + "/api/devices", method="POST", headers={"Content-Type": "application/json"},
+                                         data=json.dumps({"mode": "cloud", "server": "shelly-XX-eu.shelly.cloud", "auth_key": "KEY", "device_id": "x"}).encode())
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(bad)
+            self.assertEqual(ctx.exception.code, 400)
+            ctx.exception.close()
             dev = req("POST", "/api/devices", {"mode": "cloud", "server": self.server, "auth_key": "KEY", "device_id": "083a8dc17ef5"})
             self.assertEqual((dev["name"], dev["mode"]), ("PC THOMAS", "cloud"))
             self.assertNotIn("auth_key", req("GET", "/api/devices")[0])
