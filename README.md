@@ -1,1 +1,79 @@
-# Shelly-plug-
+# Shelly App
+
+Petite appli web pour piloter tes prises **Shelly** (Plug S, Plus Plug S, Plug Gen3…) depuis ton ordinateur ou ton téléphone, directement sur ton réseau local — sans cloud, sans compte.
+
+Aucune dépendance : uniquement la bibliothèque standard Python (3.8+).
+
+## Fonctionnalités
+
+- Allumer / éteindre d'un appui sur le gros bouton
+- Mesures en direct (rafraîchies toutes les 3 s) : puissance, énergie cumulée, tension, température
+- Minuterie : « allume/éteins puis inverse dans 5 min, 15 min, 1 h… »
+- Plusieurs prises gérées dans la même page
+- Détection automatique de la génération (Gen1 ou Gen2/Gen3)
+- Authentification supportée (Basic pour Gen1, Digest SHA-256 pour Gen2+)
+- Installable sur l'écran d'accueil du téléphone (PWA), thème clair/sombre automatique
+
+## Démarrage
+
+```bash
+python3 -m shelly_app
+```
+
+Puis ouvre <http://localhost:8080>, appuie sur **+** et entre l'adresse IP de ta prise
+(visible dans l'appli Shelly officielle ou sur l'interface de ta box).
+
+### Depuis ton téléphone
+
+Le serveur écoute sur tout le réseau local par défaut. Sur ton téléphone (même Wi‑Fi),
+ouvre `http://<IP-de-ton-ordinateur>:8080`, puis « Ajouter à l'écran d'accueil ».
+
+### Options
+
+| Option | Défaut | Rôle |
+| --- | --- | --- |
+| `--port` | `8080` | Port HTTP |
+| `--bind` | `0.0.0.0` | Adresse d'écoute (`127.0.0.1` pour limiter à cette machine) |
+| `--config` | `devices.json` | Fichier où sont enregistrées les prises |
+
+> ⚠️ Les mots de passe des prises sont stockés en clair dans `devices.json` (jamais renvoyés au navigateur). L'appli n'a pas d'authentification propre : n'expose pas le port sur Internet.
+
+## Lancer au démarrage (Raspberry Pi / Linux)
+
+```ini
+# /etc/systemd/system/shelly-app.service
+[Unit]
+Description=Shelly App
+After=network-online.target
+
+[Service]
+WorkingDirectory=/home/pi/Shelly-plug-
+ExecStart=/usr/bin/python3 -m shelly_app
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now shelly-app
+```
+
+## API
+
+L'interface s'appuie sur une petite API JSON, utilisable aussi en script :
+
+```bash
+curl http://localhost:8080/api/devices                                   # liste
+curl http://localhost:8080/api/devices/<id>/status                       # état
+curl -X POST http://localhost:8080/api/devices/<id>/switch \
+     -H 'Content-Type: application/json' -d '{"action":"on","timer":600}' # on / off / toggle
+```
+
+## Tests
+
+```bash
+python3 -m unittest
+```
+
+Les tests simulent des prises Gen1 et Gen2 (avec authentification) : pas besoin de matériel.

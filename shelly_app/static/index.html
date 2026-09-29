@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1115">
+  <title>Shelly App</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Mes prises</h1>
+    <button id="add-btn" class="icon-btn" aria-label="Ajouter une prise">+</button>
+  </header>
+
+  <main id="devices" aria-live="polite"></main>
+
+  <p id="empty" class="empty" hidden>
+    Aucune prise pour l'instant.<br>
+    Appuie sur <strong>+</strong> et entre l'adresse IP de ta Shelly.
+  </p>
+
+  <template id="card-tpl">
+    <article class="card">
+      <div class="card-head">
+        <div>
+          <h2 class="name"></h2>
+          <p class="meta"></p>
+        </div>
+        <button class="icon-btn small remove" aria-label="Supprimer">×</button>
+      </div>
+      <button class="power" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+        <span class="state">—</span>
+      </button>
+      <dl class="stats">
+        <div><dt>Puissance</dt><dd class="power-w">—</dd></div>
+        <div><dt>Énergie</dt><dd class="energy">—</dd></div>
+        <div><dt>Tension</dt><dd class="voltage">—</dd></div>
+        <div><dt>Temp.</dt><dd class="temp">—</dd></div>
+      </dl>
+      <div class="timer">
+        <label>Minuterie
+          <select class="timer-select">
+            <option value="0">Aucune</option>
+            <option value="300">5 min</option>
+            <option value="900">15 min</option>
+            <option value="1800">30 min</option>
+            <option value="3600">1 h</option>
+            <option value="7200">2 h</option>
+          </select>
+        </label>
+        <span class="timer-info"></span>
+      </div>
+      <p class="error" hidden></p>
+    </article>
+  </template>
+
+  <dialog id="add-dialog">
+    <form method="dialog" id="add-form">
+      <h2>Ajouter une prise</h2>
+      <label>Adresse IP <input name="host" required placeholder="192.168.1.50" autocomplete="off" inputmode="url"></label>
+      <label>Nom (optionnel) <input name="name" placeholder="Salon"></label>
+      <details>
+        <summary>Authentification (si activée)</summary>
+        <label>Utilisateur <input name="username" placeholder="admin" autocomplete="username"></label>
+        <label>Mot de passe <input name="password" type="password" autocomplete="current-password"></label>
+      </details>
+      <p class="error" id="add-error" hidden></p>
+      <div class="actions">
+        <button type="button" id="add-cancel" class="ghost">Annuler</button>
+        <button type="submit" id="add-submit">Ajouter</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>

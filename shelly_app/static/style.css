@@ -1,0 +1,107 @@
+:root {
+  --bg: #f4f5f7;
+  --card: #ffffff;
+  --text: #15171c;
+  --muted: #6b7280;
+  --border: #e3e5ea;
+  --accent: #16a34a;
+  --accent-soft: #dcfce7;
+  --off: #9ca3af;
+  --danger: #dc2626;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115;
+    --card: #181b22;
+    --text: #eef0f4;
+    --muted: #9aa1ad;
+    --border: #2a2f39;
+    --accent: #22c55e;
+    --accent-soft: #123222;
+    --off: #4b5260;
+    --danger: #f87171;
+  }
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  padding: env(safe-area-inset-top) 16px calc(24px + env(safe-area-inset-bottom));
+}
+.top {
+  display: flex; align-items: center; justify-content: space-between;
+  max-width: 960px; margin: 0 auto; padding: 20px 0 12px;
+}
+h1 { font-size: 1.6rem; margin: 0; }
+h2 { font-size: 1.1rem; margin: 0; }
+
+.icon-btn {
+  width: 44px; height: 44px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--card); color: var(--text);
+  font-size: 1.6rem; line-height: 1; cursor: pointer;
+}
+.icon-btn.small { width: 32px; height: 32px; font-size: 1.2rem; color: var(--muted); }
+
+#devices {
+  max-width: 960px; margin: 0 auto;
+  display: grid; gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+.card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 18px;
+  padding: 18px; display: flex; flex-direction: column; gap: 16px;
+}
+.card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.meta { margin: 4px 0 0; color: var(--muted); font-size: .85rem; }
+
+.power {
+  align-self: center;
+  width: 132px; height: 132px; border-radius: 50%;
+  border: 3px solid var(--off); background: transparent; color: var(--off);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  cursor: pointer; transition: all .2s ease; font: inherit; font-weight: 600;
+}
+.power svg { width: 44px; height: 44px; }
+.power[aria-pressed="true"] {
+  border-color: var(--accent); color: var(--accent); background: var(--accent-soft);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 15%, transparent);
+}
+.power:disabled { opacity: .5; cursor: wait; }
+.card.offline .power { cursor: not-allowed; }
+
+.stats {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 0;
+}
+.stats div { background: var(--bg); border-radius: 10px; padding: 8px 10px; }
+.stats dt { font-size: .75rem; color: var(--muted); }
+.stats dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.timer { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: .9rem; color: var(--muted); flex-wrap: wrap; }
+.timer select { margin-left: 6px; }
+select, input {
+  font: inherit; color: var(--text); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
+}
+.error { color: var(--danger); margin: 0; font-size: .9rem; }
+.empty { text-align: center; color: var(--muted); margin-top: 18vh; line-height: 1.6; }
+
+dialog {
+  border: 1px solid var(--border); border-radius: 16px; padding: 20px;
+  background: var(--card); color: var(--text); width: min(420px, calc(100vw - 32px));
+}
+dialog::backdrop { background: rgb(0 0 0 / .45); }
+#add-form { display: flex; flex-direction: column; gap: 12px; }
+#add-form label { display: flex; flex-direction: column; gap: 4px; font-size: .9rem; color: var(--muted); }
+#add-form details { display: flex; flex-direction: column; gap: 12px; }
+#add-form summary { cursor: pointer; color: var(--muted); font-size: .9rem; margin-bottom: 8px; }
+.actions { display: flex; justify-content: flex-end; gap: 8px; }
+.actions button {
+  font: inherit; padding: 8px 16px; border-radius: 10px; cursor: pointer;
+  border: 1px solid var(--accent); background: var(--accent); color: #fff; font-weight: 600;
+}
+.actions button.ghost { background: transparent; color: var(--text); border-color: var(--border); }
+.actions button:disabled { opacity: .6; cursor: wait; }

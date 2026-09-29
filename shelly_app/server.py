@@ -1,0 +1,228 @@
+"""Serveur web local pour piloter des prises Shelly.
+
+Lancement :  python3 -m shelly_app  [--port 8080] [--bind 0.0.0.0] [--config devices.json]
+"""
+
+import argparse
+import json
+import mimetypes
+import threading
+import uuid
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+from .shelly import ShellyAuthError, ShellyClient, ShellyError
+
+STATIC_DIR = Path(__file__).parent / "static"
+
+
+class DeviceStore:
+    """Liste des appareils, persistée dans un fichier JSON."""
+
+    def __init__(self, path):
+        self.path = Path(path)
+        self.lock = threading.Lock()
+        self.devices = []
+        if self.path.exists():
+            self.devices = json.loads(self.path.read_text(encoding="utf-8"))
+
+    def _save(self):
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self.devices, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(self.path)
+
+    def public(self):
+        with self.lock:
+            return [
+                {k: d.get(k) for k in ("id", "name", "host", "model", "gen")} for d in self.devices
+            ]
+
+    def get(self, device_id):
+        with self.lock:
+            return next((dict(d) for d in self.devices if d["id"] == device_id), None)
+
+    def add(self, device):
+        with self.lock:
+            device["id"] = uuid.uuid4().hex[:8]
+            self.devices.append(device)
+            self._save()
+            return device
+
+    def update(self, device_id, **fields):
+        with self.lock:
+            for d in self.devices:
+                if d["id"] == device_id:
+                    d.update(fields)
+                    self._save()
+                    return d
+        return None
+
+    def remove(self, device_id):
+        with self.lock:
+            before = len(self.devices)
+            self.devices = [d for d in self.devices if d["id"] != device_id]
+            if len(self.devices) != before:
+                self._save()
+                return True
+            return False
+
+
+def client_for(device):
+    return ShellyClient(
+        device["host"], device.get("username"), device.get("password"), device.get("gen")
+    )
+
+
+class Handler(BaseHTTPRequestHandler):
+    store: DeviceStore = None
+    server_version = "ShellyApp/1.0"
+
+    def log_message(self, fmt, *args):
+        pass
+
+    # --- Helpers ---------------------------------------------------------
+
+    def _json(self, code, payload):
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _body(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        if not length:
+            return {}
+        try:
+            data = json.loads(self.rfile.read(length))
+        except ValueError:
+            return None
+        return data if isinstance(data, dict) else None
+
+    def _parts(self):
+        return [p for p in self.path.split("?", 1)[0].split("/") if p]
+
+    def _device_call(self, device, fn):
+        try:
+            return self._json(200, fn(client_for(device)))
+        except ShellyAuthError as e:
+            return self._json(401, {"error": str(e)})
+        except ShellyError as e:
+            return self._json(502, {"error": str(e)})
+
+    # --- Routes ----------------------------------------------------------
+
+    def do_GET(self):
+        parts = self._parts()
+        if parts[:2] == ["api", "devices"]:
+            if len(parts) == 2:
+                return self._json(200, self.store.public())
+            if len(parts) == 4 and parts[3] == "status":
+                device = self.store.get(parts[2])
+                if not device:
+                    return self._json(404, {"error": "Appareil inconnu"})
+                return self._device_call(device, lambda c: c.status())
+            return self._json(404, {"error": "Introuvable"})
+        return self._static(parts)
+
+    def do_POST(self):
+        parts = self._parts()
+        body = self._body()
+        if body is None:
+            return self._json(400, {"error": "JSON invalide"})
+
+        if parts == ["api", "devices"]:
+            return self._add_device(body)
+
+        if len(parts) == 4 and parts[:2] == ["api", "devices"] and parts[3] == "switch":
+            device = self.store.get(parts[2])
+            if not device:
+                return self._json(404, {"error": "Appareil inconnu"})
+            action = body.get("action")
+            if action not in ("on", "off", "toggle"):
+                return self._json(400, {"error": "action doit être on, off ou toggle"})
+            timer = body.get("timer")
+            if timer is not None:
+                try:
+                    timer = int(timer)
+                except (TypeError, ValueError):
+                    return self._json(400, {"error": "timer doit être un nombre de secondes"})
+                if timer <= 0:
+                    timer = None
+            return self._device_call(device, lambda c: c.switch(action, timer))
+
+        return self._json(404, {"error": "Introuvable"})
+
+    def do_DELETE(self):
+        parts = self._parts()
+        if len(parts) == 3 and parts[:2] == ["api", "devices"]:
+            if self.store.remove(parts[2]):
+                return self._json(200, {"ok": True})
+            return self._json(404, {"error": "Appareil inconnu"})
+        return self._json(404, {"error": "Introuvable"})
+
+    def _add_device(self, body):
+        host = (body.get("host") or "").strip()
+        if not host:
+            return self._json(400, {"error": "Adresse IP requise"})
+        client = ShellyClient(host, body.get("username"), body.get("password"))
+        try:
+            info = client.info()
+        except ShellyAuthError as e:
+            return self._json(401, {"error": str(e)})
+        except ShellyError as e:
+            return self._json(502, {"error": str(e)})
+        device = self.store.add(
+            {
+                "name": (body.get("name") or "").strip() or info.get("name") or info.get("model") or host,
+                "host": host,
+                "username": body.get("username") or None,
+                "password": body.get("password") or None,
+                "gen": info["gen"],
+                "model": info.get("model"),
+            }
+        )
+        return self._json(201, {k: device[k] for k in ("id", "name", "host", "model", "gen")})
+
+    def _static(self, parts):
+        rel = "/".join(parts) or "index.html"
+        path = (STATIC_DIR / rel).resolve()
+        if STATIC_DIR.resolve() not in path.parents or not path.is_file():
+            return self._json(404, {"error": "Introuvable"})
+        body = path.read_bytes()
+        ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        if path.suffix == ".webmanifest":
+            ctype = "application/manifest+json"
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def make_server(bind, port, config):
+    handler = type("BoundHandler", (Handler,), {"store": DeviceStore(config)})
+    return ThreadingHTTPServer((bind, port), handler)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Pilote tes prises Shelly depuis le navigateur.")
+    parser.add_argument("--bind", default="0.0.0.0", help="adresse d'écoute (défaut : 0.0.0.0)")
+    parser.add_argument("--port", type=int, default=8080, help="port (défaut : 8080)")
+    parser.add_argument("--config", default="devices.json", help="fichier des appareils")
+    args = parser.parse_args(argv)
+
+    server = make_server(args.bind, args.port, args.config)
+    print(f"Shelly App disponible sur http://localhost:{args.port}  (Ctrl+C pour arrêter)")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()
