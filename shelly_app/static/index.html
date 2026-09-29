@@ -14,6 +14,7 @@
   <header class="top">
     <h1>Mes prises</h1>
     <div class="top-actions">
+      <button id="notify-btn" class="icon-btn" aria-label="Notifications">🔔</button>
       <button id="settings-btn" class="icon-btn" aria-label="Tarif de l'électricité">€</button>
       <button id="add-btn" class="icon-btn" aria-label="Ajouter une prise">+</button>
     </div>
@@ -191,6 +192,60 @@
     <div class="actions">
       <button type="button" class="ghost close">Annuler</button>
       <button type="button" id="settings-save" class="primary">Enregistrer</button>
+    </div>
+  </dialog>
+
+  <dialog id="notify-dialog" class="sheet">
+    <div class="sheet-head">
+      <h2>Notifications</h2>
+      <button type="button" class="icon-btn small close" aria-label="Fermer">×</button>
+    </div>
+    <label class="switch-row"><input type="checkbox" id="n-enabled"> Recevoir des notifications sur mon téléphone</label>
+
+    <section class="n-setup">
+      <h3>1. Installe l'appli ntfy</h3>
+      <p class="hint">Gratuite, sans compte :
+        <a href="https://play.google.com/store/apps/details?id=io.heckel.ntfy" target="_blank" rel="noopener">Play Store</a> ·
+        <a href="https://f-droid.org/packages/io.heckel.ntfy/" target="_blank" rel="noopener">F-Droid</a> ·
+        <a href="https://apps.apple.com/app/ntfy/id1625396347" target="_blank" rel="noopener">iPhone</a></p>
+      <h3>2. Abonne-toi à ton sujet</h3>
+      <p class="hint">Dans ntfy : <strong>+</strong> → nom du sujet ci-dessous. Ce nom sert de mot de passe : ne le partage pas.</p>
+      <div class="row">
+        <code id="n-topic" class="topic"></code>
+        <button type="button" class="chip" id="n-copy">Copier</button>
+        <a class="chip" id="n-subscribe" href="#">Ouvrir dans ntfy</a>
+      </div>
+      <h3>3. Enregistre, puis teste</h3>
+      <button type="button" class="chip" id="n-test">Envoyer une notification de test</button>
+      <p class="hint" id="n-test-result" hidden></p>
+    </section>
+
+    <section>
+      <h3>Alertes</h3>
+      <label class="switch-row"><input type="checkbox" id="n-late"><span>PC encore allumé à
+        <input type="time" id="n-late-time"> (au-dessus de <input type="number" id="n-late-w" min="0" max="5000" class="small-num"> W)</span></label>
+      <label class="switch-row"><input type="checkbox" id="n-postponed"><span>Arrêt programmé reporté, puis prise enfin coupée</span></label>
+      <label class="switch-row"><input type="checkbox" id="n-offline"><span>Prise injoignable depuis
+        <input type="number" id="n-offline-min" min="1" max="1440" class="small-num"> min</span></label>
+      <label class="switch-row"><input type="checkbox" id="n-high"><span>Conso au-dessus de
+        <input type="number" id="n-high-w" min="1" max="5000" class="small-num"> W pendant
+        <input type="number" id="n-high-min" min="1" max="1440" class="small-num"> min</span></label>
+      <label class="switch-row"><input type="checkbox" id="n-schedule"><span>Chaque allumage / arrêt programmé</span></label>
+      <p class="hint">Les alertes « PC allumé », « arrêt reporté » et « conso élevée » ont un bouton
+        <strong>Couper la prise</strong> (Tailscale doit être actif sur le téléphone).</p>
+    </section>
+
+    <details>
+      <summary>Avancé</summary>
+      <label class="field">Serveur ntfy <input id="n-server" placeholder="https://ntfy.sh"></label>
+      <label class="field">Jeton d'accès (serveur privé uniquement) <input id="n-token" type="password" autocomplete="off"></label>
+      <button type="button" class="chip" id="n-regen">Changer de sujet</button>
+    </details>
+
+    <p class="error" id="n-error" hidden></p>
+    <div class="actions">
+      <button type="button" class="ghost close">Annuler</button>
+      <button type="button" id="n-save" class="primary">Enregistrer</button>
     </div>
   </dialog>
 

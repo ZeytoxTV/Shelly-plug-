@@ -78,7 +78,7 @@ def normalize_schedule(data):
 
 
 class Automation:
-    def __init__(self, store, history, client_for, clock=time.time):
+    def __init__(self, store, history, client_for, clock=time.time, notifier=None):
         self.store = store
         self.history = history
         self.client_for = client_for
@@ -90,6 +90,12 @@ class Automation:
         self.pending = {}  # device_id -> {"since", "low_since", "rule_time"}
         self.fetch_locks = {}  # device_id -> Lock : une seule lecture à la fois par prise
         self.discovery_at = {}  # device_id -> dernier essai de connexion locale
+        self.notifier = notifier
+        self.last_ok = {}  # device_id -> dernière lecture réussie
+        self.offline_alerted = set()
+        self.late_alerted = set()  # "device:date"
+        self.high_since = {}  # device_id -> début de la conso élevée
+        self.high_alerted = set()
         self._stop = threading.Event()
 
     # --- Relevés -----------------------------------------------------------
@@ -141,6 +147,7 @@ class Automation:
                     return {**cached[1], "stale": True, "stale_age": int(age)}
                 raise
             self.observe(dev_id, status)
+            self.last_ok[dev_id] = self.clock()
             self._maybe_discover_local(device, status)
             return dict(status)
 
@@ -180,8 +187,69 @@ class Automation:
                 self._tick_device(device, now, dt)
             except ShellyError:
                 pass  # prise injoignable : on réessaiera au prochain passage
+            self._check_alerts(device, now, dt)
         if int(now) % 3600 < TICK_S:
             self.history.purge(now)
+
+    def _notify(self, kind, title, message, device=None, **kw):
+        if self.notifier:
+            self.notifier.notify(kind, title, message, device=device, **kw)
+
+    def _notify_cfg(self):
+        return (self.notifier.get_config() if self.notifier else None) or {}
+
+    def _check_alerts(self, device, now, dt):
+        """Alertes ntfy : prise injoignable, PC allumé tard, conso élevée."""
+        cfg = self._notify_cfg()
+        if not cfg.get("enabled"):
+            return
+        dev_id, name = device["id"], device.get("name") or "Prise"
+        self.last_ok.setdefault(dev_id, now)  # pas de fausse alerte au démarrage
+
+        off = cfg.get("offline") or {}
+        silent = now - self.last_ok[dev_id]
+        if off.get("enabled") and silent >= off["minutes"] * 60 and dev_id not in self.offline_alerted:
+            self.offline_alerted.add(dev_id)
+            self._notify("offline", f"{name} ne répond plus",
+                         f"Aucune réponse de la prise depuis {int(silent // 60)} min (ni en local, ni via le cloud).",
+                         device=device, priority=4, tags=["warning"])
+        elif dev_id in self.offline_alerted and silent < 120:
+            self.offline_alerted.discard(dev_id)
+            self._notify("offline", f"{name} répond de nouveau", "La prise est de nouveau joignable.",
+                         device=device, priority=2, tags=["white_check_mark"])
+
+        with self.lock:
+            cached = self.latest.get(dev_id)
+        status = cached[1] if cached and now - cached[0] <= 2 * SAMPLE_EVERY_S else None
+        power = (status or {}).get("power") or 0
+        is_on = bool((status or {}).get("on"))
+
+        late = cfg.get("late") or {}
+        if late.get("enabled") and status is not None:
+            h, m = map(int, late["time"].split(":"))
+            key = f"{dev_id}:{dt.date()}"
+            if 0 <= dt.hour * 60 + dt.minute - (h * 60 + m) < CATCH_UP_MIN and key not in self.late_alerted:
+                self.late_alerted.add(key)
+                if is_on and power >= late["threshold_w"]:
+                    self._notify("late", f"{name} encore allumé à {late['time']}",
+                                 f"L'appareil consomme {power:.0f} W. Tu joues encore ou il est resté allumé ?",
+                                 device=device, priority=4, tags=["zzz"], cut_button=True)
+            if len(self.late_alerted) > 1000:
+                self.late_alerted = {k for k in self.late_alerted if str(dt.date()) in k}
+
+        high = cfg.get("high") or {}
+        if high.get("enabled") and status is not None:
+            if is_on and power >= high["threshold_w"]:
+                since = self.high_since.setdefault(dev_id, now)
+                if now - since >= high["minutes"] * 60 and dev_id not in self.high_alerted:
+                    self.high_alerted.add(dev_id)
+                    self._notify("high", f"Conso élevée : {name}",
+                                 f"{power:.0f} W depuis {int((now - since) // 60)} min "
+                                 f"(seuil {high['threshold_w']:.0f} W).",
+                                 device=device, priority=4, tags=["zap"], cut_button=True)
+            else:
+                self.high_since.pop(dev_id, None)
+                self.high_alerted.discard(dev_id)
 
     def _tick_device(self, device, now, dt):
         dev_id = device["id"]
@@ -223,6 +291,8 @@ class Automation:
             self.pending.pop(dev_id, None)
             self.observe(dev_id, client.switch("on"))
             self.history.add_event(dev_id, f"Allumage programmé ({rule['time']})")
+            self._notify("schedule", f"{device.get('name') or 'Prise'} allumée",
+                         f"Allumage programmé de {rule['time']}.", device=device, priority=2, tags=["electric_plug"])
             return
 
         protect = sched.get("protect") or {}
@@ -235,10 +305,16 @@ class Automation:
                     dev_id,
                     f"Arrêt de {rule['time']} reporté : l'appareil consomme {power:.0f} W",
                 )
+                self._notify("postponed", f"Arrêt de {rule['time']} reporté",
+                             f"{device.get('name') or 'La prise'} consomme encore {power:.0f} W : la prise sera coupée "
+                             f"quand l'appareil sera au repos.",
+                             device=device, priority=3, tags=["hourglass"], cut_button=True)
                 return
         self.pending.pop(dev_id, None)
         self.observe(dev_id, client.switch("off"))
         self.history.add_event(dev_id, f"Arrêt programmé ({rule['time']})")
+        self._notify("schedule", f"{device.get('name') or 'Prise'} éteinte",
+                     f"Arrêt programmé de {rule['time']}.", device=device, priority=2, tags=["electric_plug"])
 
     def _check_pending(self, device, sched, now):
         dev_id = device["id"]
@@ -265,6 +341,9 @@ class Automation:
                 f"Arrêt reporté effectué : moins de {protect['threshold_w']:.0f} W "
                 f"depuis {protect['idle_minutes']} min",
             )
+            self._notify("postponed", "Prise coupée",
+                         f"{device.get('name') or 'L’appareil'} est au repos : l'arrêt de {p['rule_time']} est fait.",
+                         device=device, priority=2, tags=["white_check_mark"])
 
     def state(self, device_id):
         p = self.pending.get(device_id)

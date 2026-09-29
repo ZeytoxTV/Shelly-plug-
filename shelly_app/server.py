@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .automation import DEFAULT_SCHEDULE, Automation, next_event, normalize_schedule
 from .history import History
+from .notify import Notifier, default_notify, normalize_notify
 from .pricing import DEFAULT_PRICING, normalize_pricing, price_function
 from .shelly import CloudClient, HybridClient, ShellyAuthError, ShellyClient, ShellyError
 
@@ -93,6 +94,30 @@ class Settings:
             self.data["pricing"] = normalize_pricing(self.data["pricing"])
         except ValueError:
             self.data["pricing"] = DEFAULT_PRICING
+        if "notify" not in self.data:
+            # Sujet ntfy tiré au hasard une fois pour toutes
+            self.data["notify"] = default_notify()
+            self._save()
+        else:
+            try:
+                self.data["notify"] = normalize_notify(self.data["notify"], default_notify())
+            except ValueError:
+                self.data["notify"] = default_notify()
+
+    def _save(self):
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self.data, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(self.path)
+
+    @property
+    def notify(self):
+        with self.lock:
+            return json.loads(json.dumps(self.data["notify"]))
+
+    def set_notify(self, notify):
+        with self.lock:
+            self.data["notify"] = notify
+            self._save()
 
     @property
     def pricing(self):
@@ -102,9 +127,7 @@ class Settings:
     def set_pricing(self, pricing):
         with self.lock:
             self.data["pricing"] = pricing
-            tmp = self.path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(self.data, indent=2, ensure_ascii=False), encoding="utf-8")
-            tmp.replace(self.path)
+            self._save()
 
 
 def client_for(device):
@@ -169,7 +192,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parts = self._parts()
         if parts == ["api", "settings"]:
-            return self._json(200, {"pricing": self.settings.pricing})
+            return self._json(200, {"pricing": self.settings.pricing, "notify": self.settings.notify})
         if parts[:2] == ["api", "devices"]:
             if len(parts) == 2:
                 return self._json(200, self.store.public())
@@ -227,6 +250,18 @@ class Handler(BaseHTTPRequestHandler):
         if parts == ["api", "devices"]:
             return self._add_device(body)
 
+        if parts == ["api", "notify", "test"]:
+            notifier = self.automation.notifier
+            try:
+                sent = notifier.notify("test", "Shelly App : ça marche ! 🎉",
+                                       "Tu recevras ici les alertes de tes prises.", priority=3,
+                                       tags=["electric_plug"], wait=True)
+            except RuntimeError as e:
+                return self._json(502, {"error": str(e)})
+            if not sent:
+                return self._json(400, {"error": "Active d'abord les notifications et enregistre"})
+            return self._json(200, {"ok": True})
+
         if len(parts) == 4 and parts[:2] == ["api", "devices"] and parts[3] == "switch":
             device = self.store.get(parts[2])
             if not device:
@@ -253,11 +288,17 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {"error": "JSON invalide"})
         if parts == ["api", "settings"]:
             try:
-                pricing = normalize_pricing(body.get("pricing"))
+                pricing = normalize_pricing(body["pricing"]) if "pricing" in body else None
+                notify = normalize_notify(body["notify"], self.settings.notify) if "notify" in body else None
             except ValueError as e:
                 return self._json(400, {"error": str(e)})
-            self.settings.set_pricing(pricing)
-            return self._json(200, {"pricing": pricing})
+            if pricing is None and notify is None:
+                return self._json(400, {"error": "Rien à enregistrer"})
+            if pricing is not None:
+                self.settings.set_pricing(pricing)
+            if notify is not None:
+                self.settings.set_notify(notify)
+            return self._json(200, {"pricing": self.settings.pricing, "notify": self.settings.notify})
         if len(parts) == 4 and parts[:2] == ["api", "devices"] and parts[3] == "schedule":
             device = self.store.get(parts[2])
             if not device:
@@ -377,8 +418,8 @@ class Handler(BaseHTTPRequestHandler):
 def make_server(bind, port, config, history_db=None):
     store = DeviceStore(config)
     history = History(history_db or Path(config).with_name("history.db"))
-    automation = Automation(store, history, client_for)
     settings = Settings(Path(config).with_name("settings.json"))
+    automation = Automation(store, history, client_for, notifier=Notifier(lambda: settings.notify))
     handler = type(
         "BoundHandler",
         (Handler,),

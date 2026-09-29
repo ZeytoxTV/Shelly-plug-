@@ -16,6 +16,7 @@ Aucune dépendance : uniquement la bibliothèque standard Python (3.8+).
 - **Programmation hebdomadaire** : des horaires d'allumage/extinction différents pour chaque jour
 - **Protection anti-coupure** : à l'heure d'un arrêt programmé, si l'appareil consomme encore
   (PC allumé, partie en cours…), l'arrêt est reporté jusqu'à ce qu'il soit au repos
+- **Notifications ntfy** : PC allumé tard, arrêt reporté, prise injoignable, conso élevée
 - Plusieurs prises gérées dans la même page
 - Détection automatique de la génération (Gen1 ou Gen2/Gen3)
 - Authentification supportée (Basic pour Gen1, Digest SHA-256 pour Gen2+)
@@ -60,6 +61,28 @@ La carte de chaque prise affiche le coût du jour et du mois (avec une estimatio
 et le graphique le coût sur 24 h, par jour et au total. L'abonnement n'est pas compté : c'est
 le coût de l'énergie consommée par la prise. Les tarifs sont enregistrés dans `settings.json`.
 
+### Notifications (ntfy)
+
+Bouton **🔔** : les alertes arrivent sur le téléphone via [ntfy](https://ntfy.sh), une appli gratuite
+et sans compte ([Play Store](https://play.google.com/store/apps/details?id=io.heckel.ntfy)).
+
+1. Installe ntfy sur le téléphone ;
+2. dans ntfy, abonne-toi au **sujet** affiché (il est tiré au hasard et sert de mot de passe) ;
+3. coche « Recevoir des notifications », puis **Envoyer une notification de test**.
+
+Alertes disponibles :
+
+| Alerte | Défaut |
+| --- | --- |
+| PC encore allumé à une heure donnée (au-dessus d'un seuil) | 02:00, 30 W |
+| Arrêt programmé reporté, puis prise enfin coupée | activée |
+| Prise injoignable depuis N minutes (puis de retour) | 10 min |
+| Conso au-dessus de X W pendant N minutes | désactivée |
+| Chaque allumage / arrêt programmé | désactivée |
+
+Les alertes importantes ont un bouton **Couper la prise** (le téléphone doit joindre le Pi, via
+Tailscale). Un serveur ntfy privé et un jeton d'accès peuvent être indiqués dans « Avancé ».
+
 ### Graphique
 
 Bouton **📈 Consommation** : le serveur relève la consommation chaque minute et garde 90 jours
@@ -88,6 +111,12 @@ La clé de signature `android/shelly-widget.keystore` est versionnée pour que l
 versions s'installent par-dessus l'ancienne.
 
 ### Piloter à distance (mode Cloud)
+
+> Une prise ajoutée via le cloud est quand même **lue en direct sur le Wi‑Fi** dès que possible :
+> le cloud Shelly indique l'IP locale de la prise, le serveur vérifie qu'il s'agit bien d'elle
+> (adresse MAC) et l'utilise. Le cloud ne sert plus qu'en secours ; la carte indique
+> « lu en direct (Wi‑Fi) » ou « lu via le cloud ».
+
 
 Pas besoin d'être sur le Wi‑Fi de la maison : l'appli passe par les serveurs Shelly,
 comme l'appli officielle. Dans le formulaire d'ajout, choisis **Cloud (partout)** et renseigne :

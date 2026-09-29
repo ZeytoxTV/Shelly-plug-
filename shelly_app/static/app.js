@@ -406,6 +406,110 @@ const SettingsPanel = (() => {
     },
   };
 })();
+/* --- Panneau notifications (ntfy) ----------------------------------------- */
+const NotifyPanel = (() => {
+  const dlg = document.getElementById("notify-dialog");
+  const $ = (id) => dlg.querySelector(`#${id}`);
+  const err = $("n-error");
+  let topic = "";
+
+  function showTopic(server) {
+    $("n-topic").textContent = topic;
+    const host = (server || "https://ntfy.sh").replace(/^https?:\/\//, "");
+    $("n-subscribe").href = `ntfy://${host}/${topic}`;
+  }
+
+  function read() {
+    return {
+      enabled: $("n-enabled").checked,
+      server: $("n-server").value.trim() || "https://ntfy.sh",
+      token: $("n-token").value.trim(),
+      topic,
+      app_url: location.origin,
+      late: { enabled: $("n-late").checked, time: $("n-late-time").value, threshold_w: Number($("n-late-w").value) },
+      postponed: { enabled: $("n-postponed").checked },
+      offline: { enabled: $("n-offline").checked, minutes: Number($("n-offline-min").value) },
+      high: { enabled: $("n-high").checked, threshold_w: Number($("n-high-w").value), minutes: Number($("n-high-min").value) },
+      schedule: { enabled: $("n-schedule").checked },
+    };
+  }
+
+  async function save() {
+    err.hidden = true;
+    await api("/api/settings", { method: "PUT", body: { notify: read() } });
+  }
+
+  $("n-copy").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(topic);
+      $("n-copy").textContent = "Copié ✓";
+    } catch {
+      window.getSelection().selectAllChildren($("n-topic"));
+    }
+  });
+  $("n-regen").addEventListener("click", () => {
+    if (!confirm("Changer de sujet ? Il faudra te réabonner dans l'appli ntfy.")) return;
+    topic = "shelly-" + crypto.getRandomValues(new Uint8Array(6)).reduce((s, b) => s + b.toString(16).padStart(2, "0"), "");
+    showTopic($("n-server").value);
+  });
+  $("n-test").addEventListener("click", async (ev) => {
+    const btn = ev.currentTarget, out = $("n-test-result");
+    btn.disabled = true;
+    out.hidden = false;
+    out.textContent = "Envoi…";
+    try {
+      await save();
+      await api("/api/notify/test", { method: "POST", body: {} });
+      out.textContent = "✅ Envoyée ! Elle doit apparaître sur ton téléphone dans quelques secondes.";
+    } catch (e) {
+      out.textContent = `❌ ${e.message}`;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  $("n-save").addEventListener("click", async (ev) => {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    try {
+      await save();
+      dlg.close();
+    } catch (e) {
+      err.textContent = e.message;
+      err.hidden = false;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  dlg.querySelectorAll(".close").forEach((b) => b.addEventListener("click", () => dlg.close()));
+
+  return {
+    async open() {
+      const { notify: n } = await api("/api/settings");
+      topic = n.topic;
+      $("n-enabled").checked = n.enabled;
+      $("n-server").value = n.server;
+      $("n-token").value = n.token || "";
+      $("n-late").checked = n.late.enabled;
+      $("n-late-time").value = n.late.time;
+      $("n-late-w").value = n.late.threshold_w;
+      $("n-postponed").checked = n.postponed.enabled;
+      $("n-offline").checked = n.offline.enabled;
+      $("n-offline-min").value = n.offline.minutes;
+      $("n-high").checked = n.high.enabled;
+      $("n-high-w").value = n.high.threshold_w;
+      $("n-high-min").value = n.high.minutes;
+      $("n-schedule").checked = n.schedule.enabled;
+      $("n-copy").textContent = "Copier";
+      $("n-test-result").hidden = true;
+      err.hidden = true;
+      showTopic(n.server);
+      dlg.showModal();
+    },
+  };
+})();
+document.getElementById("notify-btn").addEventListener("click", () =>
+  NotifyPanel.open().catch((e) => alert(e.message)));
+
 document.getElementById("settings-btn").addEventListener("click", () =>
   SettingsPanel.open().catch((e) => alert(e.message)));
 
