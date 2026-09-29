@@ -54,26 +54,25 @@ ouvre `http://<IP-de-ton-ordinateur>:8080`, puis « Ajouter à l'écran d'accuei
 
 > ⚠️ Les mots de passe des prises sont stockés en clair dans `devices.json` (jamais renvoyés au navigateur). L'appli n'a pas d'authentification propre : n'expose pas le port sur Internet.
 
-## Lancer au démarrage (Raspberry Pi / Linux)
+## Installation sur un Raspberry Pi
 
-```ini
-# /etc/systemd/system/shelly-app.service
-[Unit]
-Description=Shelly App
-After=network-online.target
-
-[Service]
-WorkingDirectory=/home/pi/Shelly-plug-
-ExecStart=/usr/bin/python3 -m shelly_app
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
+Une seule commande, à lancer sur le Pi (en SSH ou directement) :
 
 ```bash
-sudo systemctl enable --now shelly-app
+curl -fsSL https://raw.githubusercontent.com/ZeytoxTV/Shelly-plug-/claude/shelly-plug-controller-app-0lh3tk/install.sh | bash
 ```
+
+Le script installe ce qu'il manque (`python3`, `git`), télécharge l'appli dans `~/shelly-app`,
+crée un service systemd qui la démarre avec le Pi, puis affiche l'adresse à ouvrir.
+Relance la même commande pour mettre à jour.
+
+Pour ouvrir l'appli depuis ton téléphone **hors de chez toi**, ajoute Tailscale (VPN gratuit) :
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ZeytoxTV/Shelly-plug-/claude/shelly-plug-controller-app-0lh3tk/install.sh | TAILSCALE=1 bash
+```
+
+puis installe l'appli Tailscale sur ton téléphone avec le même compte, et ouvre l'adresse `http://100.x.x.x:8080` affichée.
 
 ## API
 
