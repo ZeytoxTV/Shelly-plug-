@@ -55,7 +55,12 @@
         </label>
         <span class="timer-info"></span>
       </div>
+      <p class="pending" hidden></p>
       <p class="error" hidden></p>
+      <div class="card-actions">
+        <button class="chip open-chart" type="button">📈 Consommation</button>
+        <button class="chip open-schedule" type="button">🗓 Programmation</button>
+      </div>
     </article>
   </template>
 
@@ -89,6 +94,84 @@
     </form>
   </dialog>
 
+  <dialog id="chart-dialog" class="sheet">
+    <div class="sheet-head">
+      <h2>Consommation · <span class="dev-name"></span></h2>
+      <button type="button" class="icon-btn small close" aria-label="Fermer">×</button>
+    </div>
+    <div class="segmented" role="radiogroup" aria-label="Période">
+      <label><input type="radio" name="range" value="24h" checked> 24 h</label>
+      <label><input type="radio" name="range" value="7d"> 7 jours</label>
+      <label><input type="radio" name="range" value="30d"> 30 jours</label>
+    </div>
+    <div class="tiles"></div>
+    <div class="chart-wrap">
+      <svg class="chart" role="img"></svg>
+      <div class="tooltip" hidden></div>
+    </div>
+    <p class="chart-empty hint" hidden>Pas encore de données sur cette période : l'historique se remplit au fil des minutes tant que le serveur tourne.</p>
+    <details class="table-view">
+      <summary>Voir en tableau</summary>
+      <table><thead></thead><tbody></tbody></table>
+    </details>
+  </dialog>
+
+  <dialog id="schedule-dialog" class="sheet">
+    <div class="sheet-head">
+      <h2>Programmation · <span class="dev-name"></span></h2>
+      <button type="button" class="icon-btn small close" aria-label="Fermer">×</button>
+    </div>
+    <p class="pending" hidden></p>
+    <label class="switch-row"><input type="checkbox" id="sched-enabled"> Programmation active</label>
+
+    <section>
+      <h3>Semaine</h3>
+      <div class="legend"><span><i class="on"></i> Allumer</span><span><i></i> Éteindre</span></div>
+      <ul class="week"></ul>
+    </section>
+
+    <section class="add-rule">
+      <h3>Ajouter un horaire</h3>
+      <div class="row">
+        <input type="time" id="rule-time" value="23:00" required>
+        <select id="rule-action">
+          <option value="off">Éteindre</option>
+          <option value="on">Allumer</option>
+        </select>
+      </div>
+      <div class="days" role="group" aria-label="Jours"></div>
+      <div class="row quick">
+        <button type="button" class="chip" data-days="0,1,2,3,4">Semaine</button>
+        <button type="button" class="chip" data-days="5,6">Week-end</button>
+        <button type="button" class="chip" data-days="0,1,2,3,4,5,6">Tous</button>
+      </div>
+      <button type="button" id="rule-add" class="primary">Ajouter</button>
+    </section>
+
+    <section>
+      <h3>Protection anti-coupure</h3>
+      <label class="switch-row"><input type="checkbox" id="protect-enabled"> Ne pas éteindre si l'appareil est utilisé</label>
+      <div class="row protect-fields">
+        <label>Seuil <span class="unit-input"><input type="number" id="protect-threshold" min="0" max="5000" step="1"> W</span></label>
+        <label>Éteindre après <span class="unit-input"><input type="number" id="protect-idle" min="1" max="240" step="1"> min</span></label>
+      </div>
+      <p class="hint" id="protect-hint"></p>
+    </section>
+
+    <p class="error" id="sched-error" hidden></p>
+    <div class="actions">
+      <button type="button" class="ghost close">Annuler</button>
+      <button type="button" id="sched-save">Enregistrer</button>
+    </div>
+
+    <section>
+      <h3>Dernières actions</h3>
+      <ul class="events"></ul>
+    </section>
+  </dialog>
+
+  <script src="chart.js"></script>
+  <script src="schedule.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

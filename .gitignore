@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 devices.json
 devices.tmp
+history.db

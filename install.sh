@@ -77,5 +77,9 @@ if command -v tailscale >/dev/null && TS_IP="$(tailscale ip -4 2>/dev/null | hea
   echo "   De partout (Tailscale)    : http://$TS_IP:$PORT"
 fi
 echo
+TZ_NAME="$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo inconnu)"
+echo "   Heure du Pi : $(date '+%H:%M') ($TZ_NAME) — les horaires programmés suivent cette heure."
+echo "   (Si ce n'est pas la bonne : sudo timedatectl set-timezone Europe/Paris)"
+echo
 echo "   Mise à jour : relance cette même commande."
 echo "   Journal     : sudo journalctl -u shelly-app -f"

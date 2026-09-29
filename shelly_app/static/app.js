@@ -21,12 +21,14 @@ async function api(path, options = {}) {
   return data;
 }
 
+const num = (v, digits) =>
+  Number(v).toLocaleString("fr-FR", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 const fmt = (v, unit, digits = 1) =>
-  v === null || v === undefined ? "—" : `${Number(v).toFixed(digits)} ${unit}`;
+  v === null || v === undefined ? "—" : `${num(v, digits)} ${unit}`;
 
 function fmtEnergy(wh) {
   if (wh === null || wh === undefined) return "—";
-  return wh >= 1000 ? `${(wh / 1000).toFixed(2)} kWh` : `${wh.toFixed(0)} Wh`;
+  return wh >= 1000 ? `${num(wh / 1000, 2)} kWh` : `${num(wh, 0)} Wh`;
 }
 
 function fmtDuration(s) {
@@ -42,7 +44,12 @@ function render(card, status) {
   const btn = el.querySelector(".power");
   btn.setAttribute("aria-pressed", String(status.on));
   btn.querySelector(".state").textContent = status.on ? "Allumée" : "Éteinte";
+  const pending = el.querySelector(".pending");
+  const pendingText = Schedule.pendingText(status.automation);
+  pending.textContent = pendingText;
+  pending.hidden = !pendingText;
   if (status.partial) return;
+  card.status = status;
   el.querySelector(".power-w").textContent = fmt(status.power, "W");
   el.querySelector(".energy").textContent = fmtEnergy(status.energy_wh);
   el.querySelector(".voltage").textContent = fmt(status.voltage, "V", 0);
@@ -100,6 +107,10 @@ function createCard(device) {
       btn.disabled = false;
     }
   });
+
+  el.querySelector(".open-chart").addEventListener("click", () => ChartPanel.open(card));
+  el.querySelector(".open-schedule").addEventListener("click", () =>
+    Schedule.open(card).catch((e) => alert(e.message)));
 
   el.querySelector(".remove").addEventListener("click", async () => {
     if (!confirm(`Supprimer « ${device.name} » ?`)) return;
@@ -172,6 +183,80 @@ form.addEventListener("submit", async (ev) => {
     submit.textContent = "Ajouter";
   }
 });
+
+/* --- Panneau graphique --------------------------------------------------- */
+const ChartPanel = (() => {
+  const dlg = document.getElementById("chart-dialog");
+  const svg = dlg.querySelector(".chart");
+  const tiles = dlg.querySelector(".tiles");
+  const empty = dlg.querySelector(".chart-empty");
+  const table = dlg.querySelector(".table-view table");
+  let card = null, data = null;
+
+  const tile = (k, v) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+  const hhmm = (ts) => new Date(ts * 1000).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+
+  function draw() {
+    if (!data) return;
+    const wrap = dlg.querySelector(".chart-wrap");
+    wrap.querySelector(".tooltip").hidden = true;
+    if (data.power) {
+      const pts = data.power.filter((p) => p.avg != null);
+      const avg = pts.length ? pts.reduce((a, p) => a + p.avg, 0) / pts.length : null;
+      const peak = pts.length ? pts.reduce((a, p) => (p.max > a.max ? p : a)) : null;
+      const wh = pts.reduce((a, p) => a + p.avg / 6, 0);
+      tiles.innerHTML = tile("Moyenne", fmt(avg, "W", 0)) +
+        tile("Pic", peak ? `${Math.round(peak.max)} W <small>${hhmm(peak.ts)}</small>` : "—") +
+        tile("Énergie 24 h", pts.length ? fmtEnergy(wh) : "—");
+      empty.hidden = pts.length > 0;
+      wrap.hidden = !pts.length;
+      if (pts.length) Charts.power(svg, data.power);
+      table.tHead.innerHTML = "<tr><th>Heure</th><th>Moyenne</th><th>Pic</th></tr>";
+      table.tBodies[0].innerHTML = pts.slice().reverse()
+        .map((p) => `<tr><td>${hhmm(p.ts)}</td><td>${Math.round(p.avg)} W</td><td>${Math.round(p.max)} W</td></tr>`).join("");
+    } else {
+      const days = data.daily.filter((d) => d.wh != null);
+      const total = days.reduce((a, d) => a + d.wh, 0);
+      const best = days.length ? days.reduce((a, d) => (d.wh > a.wh ? d : a)) : null;
+      const dayLabel = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" });
+      tiles.innerHTML = tile("Total", days.length ? fmtEnergy(total) : "—") +
+        tile("Moyenne / jour", days.length ? fmtEnergy(total / days.length) : "—") +
+        tile("Jour max", best ? `${fmtEnergy(best.wh)} <small>${dayLabel(best.date)}</small>` : "—");
+      empty.hidden = days.length > 0;
+      wrap.hidden = !days.length;
+      if (days.length) Charts.daily(svg, data.daily, fmtEnergy);
+      table.tHead.innerHTML = "<tr><th>Jour</th><th>Énergie</th></tr>";
+      table.tBodies[0].innerHTML = days.slice().reverse()
+        .map((d) => `<tr><td>${dayLabel(d.date)}</td><td>${fmtEnergy(d.wh)}</td></tr>`).join("");
+    }
+  }
+
+  async function load() {
+    const range = dlg.querySelector("input[name=range]:checked").value;
+    try {
+      data = await api(`/api/devices/${card.device.id}/history?range=${range}`);
+      draw();
+    } catch (e) {
+      tiles.innerHTML = "";
+      empty.textContent = e.message;
+      empty.hidden = false;
+    }
+  }
+
+  dlg.querySelectorAll("input[name=range]").forEach((r) => r.addEventListener("change", load));
+  dlg.querySelector(".close").addEventListener("click", () => dlg.close());
+  window.addEventListener("resize", () => dlg.open && draw());
+
+  return {
+    open(c) {
+      card = c;
+      data = null;
+      dlg.querySelector(".dev-name").textContent = c.device.name;
+      dlg.showModal();
+      load();
+    },
+  };
+})();
 
 setInterval(() => {
   if (!document.hidden) cards.forEach((c) => refresh(c, false));

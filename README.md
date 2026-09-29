@@ -11,6 +11,10 @@ Aucune dépendance : uniquement la bibliothèque standard Python (3.8+).
 - Allumer / éteindre d'un appui sur le gros bouton
 - Mesures en direct (rafraîchies toutes les 3 s) : puissance, énergie cumulée, tension, température
 - Minuterie : « allume/éteins puis inverse dans 5 min, 15 min, 1 h… »
+- **Graphique de consommation** : puissance sur 24 h, énergie par jour sur 7 et 30 jours
+- **Programmation hebdomadaire** : des horaires d'allumage/extinction différents pour chaque jour
+- **Protection anti-coupure** : à l'heure d'un arrêt programmé, si l'appareil consomme encore
+  (PC allumé, partie en cours…), l'arrêt est reporté jusqu'à ce qu'il soit au repos
 - Plusieurs prises gérées dans la même page
 - Détection automatique de la génération (Gen1 ou Gen2/Gen3)
 - Authentification supportée (Basic pour Gen1, Digest SHA-256 pour Gen2+)
@@ -24,6 +28,27 @@ python3 -m shelly_app
 
 Puis ouvre <http://localhost:8080>, appuie sur **+** et entre l'adresse IP de ta prise
 (visible dans l'appli Shelly officielle ou sur l'interface de ta box).
+
+### Programmation et protection anti-coupure
+
+Bouton **🗓 Programmation** sur la carte d'une prise :
+
+1. Choisis une heure, « Allumer » ou « Éteindre », et les jours (ou *Semaine* / *Week-end* / *Tous*).
+2. Répète pour chaque horaire ; la vue *Semaine* montre ce qui est prévu jour par jour.
+3. **Protection anti-coupure** (activée par défaut) : à l'heure d'un arrêt, si la prise mesure plus que
+   le **seuil** (ex. 30 W), elle reste allumée. Elle s'éteint seulement quand la consommation est restée
+   sous le seuil pendant la durée choisie (ex. 5 min) — typiquement après l'arrêt du PC.
+   Choisis un seuil entre la veille du PC éteint (quelques W) et sa conso allumé (souvent 50 W et plus).
+
+Les horaires sont appliqués par le serveur (le Pi), même si aucune page n'est ouverte ;
+ils suivent l'heure du Pi (`timedatectl` pour vérifier le fuseau). Les dernières actions automatiques
+(allumages, arrêts, reports) sont listées en bas du panneau.
+
+### Graphique
+
+Bouton **📈 Consommation** : le serveur relève la consommation chaque minute et garde 90 jours
+d'historique (`history.db`, à côté de `devices.json`). Touche le graphique pour lire une valeur ;
+« Voir en tableau » donne les chiffres.
 
 ### Piloter à distance (mode Cloud)
 
@@ -83,6 +108,8 @@ curl http://localhost:8080/api/devices                                   # liste
 curl http://localhost:8080/api/devices/<id>/status                       # état
 curl -X POST http://localhost:8080/api/devices/<id>/switch \
      -H 'Content-Type: application/json' -d '{"action":"on","timer":600}' # on / off / toggle
+curl http://localhost:8080/api/devices/<id>/history?range=24h           # 24h, 7d ou 30d
+curl http://localhost:8080/api/devices/<id>/schedule                     # programmation (PUT pour modifier)
 ```
 
 ## Tests

@@ -1,0 +1,232 @@
+"""Programmation hebdomadaire, protection anti-coupure et relevé de consommation.
+
+Tourne en tâche de fond dans le serveur :
+- relève la consommation de chaque prise une fois par minute (pour les graphiques) ;
+- applique les horaires programmés, jour par jour ;
+- ne coupe pas la prise si l'appareil consomme encore (PC allumé, partie en cours…) :
+  l'arrêt est reporté jusqu'à ce que la consommation reste sous le seuil
+  pendant quelques minutes.
+"""
+
+import re
+import threading
+import time
+from datetime import datetime
+
+from .shelly import ShellyError
+
+SAMPLE_EVERY_S = 60
+TICK_S = 15
+CATCH_UP_MIN = 5  # une règle ratée de peu (redémarrage, requête lente) est encore appliquée
+DAY_NAMES = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+
+DEFAULT_SCHEDULE = {
+    "enabled": True,
+    "rules": [],
+    "protect": {"enabled": True, "threshold_w": 15, "idle_minutes": 5},
+}
+TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+def normalize_schedule(data):
+    """Valide une programmation envoyée par l'interface. Lève ValueError si invalide."""
+    if not isinstance(data, dict):
+        raise ValueError("Programmation invalide")
+    rules = data.get("rules", [])
+    if not isinstance(rules, list) or len(rules) > 100:
+        raise ValueError("Liste d'horaires invalide")
+    clean = []
+    for i, r in enumerate(rules):
+        if not isinstance(r, dict):
+            raise ValueError("Horaire invalide")
+        t = str(r.get("time", ""))
+        if not TIME_RE.match(t):
+            raise ValueError(f"Heure invalide : {t!r}")
+        days = r.get("days")
+        if not isinstance(days, list) or not days or not all(d in range(7) for d in days):
+            raise ValueError("Choisis au moins un jour")
+        if r.get("action") not in ("on", "off"):
+            raise ValueError("Action invalide")
+        clean.append(
+            {
+                "id": str(r.get("id") or f"r{i}")[:32],
+                "time": t,
+                "days": sorted(set(days)),
+                "action": r["action"],
+            }
+        )
+    p = data.get("protect") or {}
+    try:
+        threshold = float(p.get("threshold_w", 15))
+        idle = int(p.get("idle_minutes", 5))
+    except (TypeError, ValueError):
+        raise ValueError("Seuil ou durée invalide") from None
+    if not 0 <= threshold <= 5000 or not 1 <= idle <= 240:
+        raise ValueError("Seuil (0–5000 W) ou durée (1–240 min) hors limites")
+    return {
+        "enabled": bool(data.get("enabled", True)),
+        "rules": clean,
+        "protect": {"enabled": bool(p.get("enabled", True)), "threshold_w": threshold, "idle_minutes": idle},
+    }
+
+
+class Automation:
+    def __init__(self, store, history, client_for, clock=time.time):
+        self.store = store
+        self.history = history
+        self.client_for = client_for
+        self.clock = clock
+        self.lock = threading.Lock()
+        self.latest = {}  # device_id -> (ts, status)
+        self.last_sample = {}  # device_id -> ts
+        self.fired = set()  # clés "rule:date:heure" déjà appliquées
+        self.pending = {}  # device_id -> {"since", "low_since", "rule_time"}
+        self._stop = threading.Event()
+
+    # --- Relevés -----------------------------------------------------------
+
+    def observe(self, device_id, status):
+        """Mémorise un état complet ; en garde une mesure par minute dans l'historique."""
+        if status.get("partial"):
+            return
+        now = self.clock()
+        with self.lock:
+            self.latest[device_id] = (now, status)
+            due = now - self.last_sample.get(device_id, 0) >= SAMPLE_EVERY_S - 1
+            if due:
+                self.last_sample[device_id] = now
+        if due:
+            self.history.add_sample(device_id, status, now)
+
+    def _fresh_status(self, device, max_age=0):
+        with self.lock:
+            cached = self.latest.get(device["id"])
+        if cached and self.clock() - cached[0] <= max_age:
+            return cached[1]
+        status = self.client_for(device).status()
+        self.observe(device["id"], status)
+        return status
+
+    # --- Boucle -------------------------------------------------------------
+
+    def tick(self):
+        now = self.clock()
+        dt = datetime.fromtimestamp(now)
+        for device in self.store.all():
+            try:
+                self._tick_device(device, now, dt)
+            except ShellyError:
+                pass  # prise injoignable : on réessaiera au prochain passage
+        if int(now) % 3600 < TICK_S:
+            self.history.purge(now)
+
+    def _tick_device(self, device, now, dt):
+        dev_id = device["id"]
+        # Relevé périodique pour les graphiques
+        if now - self.last_sample.get(dev_id, 0) >= SAMPLE_EVERY_S:
+            try:
+                self._fresh_status(device, max_age=SAMPLE_EVERY_S / 2)
+            except ShellyError:
+                pass  # les horaires sont quand même tentés
+
+        sched = device.get("schedule") or DEFAULT_SCHEDULE
+        if sched.get("enabled"):
+            minute_now = dt.hour * 60 + dt.minute
+            for rule in sched.get("rules", []):
+                if dt.weekday() not in rule["days"]:
+                    continue
+                h, m = map(int, rule["time"].split(":"))
+                late = minute_now - (h * 60 + m)
+                key = f"{dev_id}:{rule['id']}:{dt.date()}:{rule['time']}"
+                if 0 <= late < CATCH_UP_MIN and key not in self.fired:
+                    try:
+                        self._apply_rule(device, sched, rule)
+                        self.fired.add(key)
+                    except ShellyError as e:
+                        # Réessayé à chaque passage pendant CATCH_UP_MIN minutes
+                        if late == CATCH_UP_MIN - 1 and key + ":err" not in self.fired:
+                            self.fired.add(key + ":err")
+                            self.history.add_event(dev_id, f"Échec de l'horaire {rule['time']} : {e}")
+            if len(self.fired) > 5000:
+                self.fired = {k for k in self.fired if str(dt.date()) in k}
+
+        if dev_id in self.pending:
+            self._check_pending(device, sched, now)
+
+    def _apply_rule(self, device, sched, rule):
+        dev_id = device["id"]
+        client = self.client_for(device)
+        if rule["action"] == "on":
+            self.pending.pop(dev_id, None)
+            self.observe(dev_id, client.switch("on"))
+            self.history.add_event(dev_id, f"Allumage programmé ({rule['time']})")
+            return
+
+        protect = sched.get("protect") or {}
+        if protect.get("enabled"):
+            status = self._fresh_status(device)
+            power = status.get("power") or 0
+            if status.get("on") and power >= protect["threshold_w"]:
+                self.pending[dev_id] = {"since": self.clock(), "low_since": None, "rule_time": rule["time"]}
+                self.history.add_event(
+                    dev_id,
+                    f"Arrêt de {rule['time']} reporté : l'appareil consomme {power:.0f} W",
+                )
+                return
+        self.pending.pop(dev_id, None)
+        self.observe(dev_id, client.switch("off"))
+        self.history.add_event(dev_id, f"Arrêt programmé ({rule['time']})")
+
+    def _check_pending(self, device, sched, now):
+        dev_id = device["id"]
+        p = self.pending[dev_id]
+        protect = sched.get("protect") or {}
+        status = self._fresh_status(device, max_age=SAMPLE_EVERY_S)
+        if not status.get("on"):
+            self.pending.pop(dev_id, None)
+            self.history.add_event(dev_id, "Prise éteinte manuellement, arrêt reporté annulé")
+            return
+        if not sched.get("enabled") or not protect.get("enabled"):
+            self.pending.pop(dev_id, None)
+            return
+        if (status.get("power") or 0) >= protect["threshold_w"]:
+            p["low_since"] = None
+            return
+        if p["low_since"] is None:
+            p["low_since"] = now
+        if now - p["low_since"] >= protect["idle_minutes"] * 60:
+            self.pending.pop(dev_id, None)
+            self.observe(dev_id, self.client_for(device).switch("off"))
+            self.history.add_event(
+                dev_id,
+                f"Arrêt reporté effectué : moins de {protect['threshold_w']:.0f} W "
+                f"depuis {protect['idle_minutes']} min",
+            )
+
+    def state(self, device_id):
+        p = self.pending.get(device_id)
+        if not p:
+            return None
+        return {"pending_off_since": int(p["since"]), "rule_time": p["rule_time"], "low_since": p["low_since"]}
+
+    def forget(self, device_id):
+        self.pending.pop(device_id, None)
+        with self.lock:
+            self.latest.pop(device_id, None)
+            self.last_sample.pop(device_id, None)
+
+    # --- Thread ---------------------------------------------------------
+
+    def start(self):
+        def loop():
+            while not self._stop.is_set():
+                try:
+                    self.tick()
+                except Exception as e:  # la boucle ne doit jamais mourir
+                    print(f"[automation] erreur : {e}", flush=True)
+                self._stop.wait(TICK_S)
+
+        threading.Thread(target=loop, daemon=True, name="automation").start()
+
+    def stop(self):
+        self._stop.set()

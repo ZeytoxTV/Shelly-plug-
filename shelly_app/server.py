@@ -7,10 +7,13 @@ import argparse
 import json
 import mimetypes
 import threading
+import urllib.parse
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from .automation import DEFAULT_SCHEDULE, Automation, normalize_schedule
+from .history import History
 from .shelly import CloudClient, ShellyAuthError, ShellyClient, ShellyError
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -37,6 +40,10 @@ class DeviceStore:
             return [
                 {k: d.get(k) for k in PUBLIC_FIELDS} for d in self.devices
             ]
+
+    def all(self):
+        with self.lock:
+            return [dict(d) for d in self.devices]
 
     def get(self, device_id):
         with self.lock:
@@ -78,6 +85,8 @@ def client_for(device):
 
 class Handler(BaseHTTPRequestHandler):
     store: DeviceStore = None
+    history: History = None
+    automation: Automation = None
     server_version = "ShellyApp/1.0"
 
     def log_message(self, fmt, *args):
@@ -109,7 +118,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _device_call(self, device, fn):
         try:
-            return self._json(200, fn(client_for(device)))
+            result = fn(client_for(device))
+            self.automation.observe(device["id"], result)
+            result["automation"] = self.automation.state(device["id"])
+            return self._json(200, result)
         except ShellyAuthError as e:
             return self._json(401, {"error": str(e)})
         except ShellyError as e:
@@ -127,6 +139,20 @@ class Handler(BaseHTTPRequestHandler):
                 if not device:
                     return self._json(404, {"error": "Appareil inconnu"})
                 return self._device_call(device, lambda c: c.status())
+            if len(parts) == 4 and parts[3] in ("history", "schedule"):
+                device = self.store.get(parts[2])
+                if not device:
+                    return self._json(404, {"error": "Appareil inconnu"})
+                if parts[3] == "schedule":
+                    return self._json(200, self._schedule_payload(device))
+                query = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(self.path).query))
+                rng = query.get("range", "24h")
+                if rng == "24h":
+                    return self._json(200, {"range": rng, "power": self.history.power_series(device["id"])})
+                if rng in ("7d", "30d"):
+                    days = int(rng[:-1])
+                    return self._json(200, {"range": rng, "daily": self.history.daily_energy(device["id"], days)})
+                return self._json(400, {"error": "range doit être 24h, 7d ou 30d"})
             return self._json(404, {"error": "Introuvable"})
         return self._static(parts)
 
@@ -158,10 +184,36 @@ class Handler(BaseHTTPRequestHandler):
 
         return self._json(404, {"error": "Introuvable"})
 
+    def do_PUT(self):
+        parts = self._parts()
+        body = self._body()
+        if body is None:
+            return self._json(400, {"error": "JSON invalide"})
+        if len(parts) == 4 and parts[:2] == ["api", "devices"] and parts[3] == "schedule":
+            device = self.store.get(parts[2])
+            if not device:
+                return self._json(404, {"error": "Appareil inconnu"})
+            try:
+                schedule = normalize_schedule(body)
+            except ValueError as e:
+                return self._json(400, {"error": str(e)})
+            device = self.store.update(device["id"], schedule=schedule)
+            return self._json(200, self._schedule_payload(device))
+        return self._json(404, {"error": "Introuvable"})
+
+    def _schedule_payload(self, device):
+        return {
+            "schedule": device.get("schedule") or DEFAULT_SCHEDULE,
+            "pending": self.automation.state(device["id"]),
+            "events": self.history.events(device["id"]),
+        }
+
     def do_DELETE(self):
         parts = self._parts()
         if len(parts) == 3 and parts[:2] == ["api", "devices"]:
             if self.store.remove(parts[2]):
+                self.automation.forget(parts[2])
+                self.history.forget(parts[2])
                 return self._json(200, {"ok": True})
             return self._json(404, {"error": "Appareil inconnu"})
         return self._json(404, {"error": "Introuvable"})
@@ -217,9 +269,16 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def make_server(bind, port, config):
-    handler = type("BoundHandler", (Handler,), {"store": DeviceStore(config)})
-    return ThreadingHTTPServer((bind, port), handler)
+def make_server(bind, port, config, history_db=None):
+    store = DeviceStore(config)
+    history = History(history_db or Path(config).with_name("history.db"))
+    automation = Automation(store, history, client_for)
+    handler = type(
+        "BoundHandler", (Handler,), {"store": store, "history": history, "automation": automation}
+    )
+    server = ThreadingHTTPServer((bind, port), handler)
+    server.automation = automation
+    return server
 
 
 def main(argv=None):
@@ -230,6 +289,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     server = make_server(args.bind, args.port, args.config)
+    server.automation.start()
     print(f"Shelly App disponible sur http://localhost:{args.port}  (Ctrl+C pour arrêter)")
     try:
         server.serve_forever()

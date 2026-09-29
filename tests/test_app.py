@@ -182,6 +182,25 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.req("DELETE", f"/api/devices/{dev['id']}")[0], 200)
         self.assertEqual(json.loads(self.config.read_text()), [])
 
+    def test_schedule_and_history_routes(self):
+        _, dev = self.req("POST", "/api/devices", {"host": f"127.0.0.1:{self.plug.server_port}"})
+        code, data = self.req("GET", f"/api/devices/{dev['id']}/schedule")
+        self.assertEqual((code, data["schedule"]["rules"], data["pending"]), (200, [], None))
+        sched = {"enabled": True, "rules": [{"id": "x", "time": "23:30", "days": [0, 4], "action": "off"}],
+                 "protect": {"enabled": True, "threshold_w": 40, "idle_minutes": 10}}
+        code, data = self.req("PUT", f"/api/devices/{dev['id']}/schedule", sched)
+        self.assertEqual((code, data["schedule"]["protect"]["threshold_w"]), (200, 40))
+        self.assertEqual(json.loads(self.config.read_text())[0]["schedule"]["rules"][0]["days"], [0, 4])
+        self.assertEqual(self.req("PUT", f"/api/devices/{dev['id']}/schedule", {"rules": [{"time": "99:00"}]})[0], 400)
+
+        self.req("GET", f"/api/devices/{dev['id']}/status")  # enregistre une mesure
+        code, data = self.req("GET", f"/api/devices/{dev['id']}/history?range=24h")
+        self.assertEqual(code, 200)
+        self.assertEqual(max(p["avg"] or 0 for p in data["power"]), 42.0)
+        code, data = self.req("GET", f"/api/devices/{dev['id']}/history?range=7d")
+        self.assertEqual((code, len(data["daily"])), (200, 7))
+        self.assertEqual(self.req("GET", f"/api/devices/{dev['id']}/history?range=1y")[0], 400)
+
     def test_unreachable(self):
         self.assertEqual(self.req("POST", "/api/devices", {"host": "127.0.0.1:1"})[0], 502)
 
