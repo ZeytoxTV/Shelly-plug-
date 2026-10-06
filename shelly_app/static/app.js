@@ -189,7 +189,25 @@ function updateEmpty() {
   empty.hidden = cards.size > 0;
 }
 
+// Adresses du Pi : à la maison (Wi‑Fi) et de partout (Tailscale), à mettre en favori
+async function showAddresses() {
+  try {
+    const info = await api("/api/info");
+    const el = document.getElementById("addresses");
+    const link = (u) => `<a href="${u}/">${u.replace("http://", "")}</a>`;
+    const parts = [];
+    if (info.lan.length) parts.push(`🏠 À la maison : ${info.lan.map(link).join(" · ")}`);
+    if (info.tailscale.length) parts.push(`🌍 Partout (Tailscale) : ${info.tailscale.map(link).join(" · ")}`);
+    if (!parts.length) return;
+    el.innerHTML = parts.join("<br>");
+    el.hidden = false;
+  } catch {
+    /* information facultative */
+  }
+}
+
 async function load() {
+  showAddresses();
   try {
     const devices = await api("/api/devices");
     devices.forEach(createCard);
@@ -289,7 +307,25 @@ const ChartPanel = (() => {
     }
   }
 
-  async function load() {
+  // Adresses du Pi : à la maison (Wi‑Fi) et de partout (Tailscale), à mettre en favori
+async function showAddresses() {
+  try {
+    const info = await api("/api/info");
+    const el = document.getElementById("addresses");
+    const link = (u) => `<a href="${u}/">${u.replace("http://", "")}</a>`;
+    const parts = [];
+    if (info.lan.length) parts.push(`🏠 À la maison : ${info.lan.map(link).join(" · ")}`);
+    if (info.tailscale.length) parts.push(`🌍 Partout (Tailscale) : ${info.tailscale.map(link).join(" · ")}`);
+    if (!parts.length) return;
+    el.innerHTML = parts.join("<br>");
+    el.hidden = false;
+  } catch {
+    /* information facultative */
+  }
+}
+
+async function load() {
+  showAddresses();
     const range = dlg.querySelector("input[name=range]:checked").value;
     try {
       data = await api(`/api/devices/${card.device.id}/history?range=${range}`);

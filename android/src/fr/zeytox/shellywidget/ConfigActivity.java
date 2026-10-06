@@ -49,9 +49,9 @@ public class ConfigActivity extends Activity {
 
         TextView help = new TextView(this);
         help.setText(widgetId == AppWidgetManager.INVALID_APPWIDGET_ID
-                ? "Pour ajouter le widget : appui long sur l'écran d'accueil → Widgets → Shelly Widget (4×4).\n\n"
-                  + "Adresse de ton Pi (Tailscale activé sur le téléphone) :"
-                : "Adresse de ton Pi (Tailscale activé sur le téléphone) :");
+                ? "Pour ajouter un widget : appui long sur l'écran d'accueil → Widgets → Shelly Widget.\n\n"
+                  + "Adresse de ton Pi (maison ou Tailscale : l'autre est trouvée automatiquement) :"
+                : "Adresse de ton Pi (maison ou Tailscale : l'autre est trouvée automatiquement) :");
         help.setPadding(0, dp(12), 0, dp(6));
         root.addView(help);
 
@@ -87,7 +87,11 @@ public class ConfigActivity extends Activity {
         new Thread(() -> {
             try {
                 JSONArray devices = Api.devices(url);
-                runOnUiThread(() -> showDevices(url, devices));
+                JSONObject info = Api.learnAddresses(getApplicationContext(), url);
+                runOnUiThread(() -> {
+                    showDevices(url, devices);
+                    showAddresses(info);
+                });
             } catch (Exception e) {
                 runOnUiThread(() -> status.setText("Impossible de joindre le Pi : " + e.getMessage()
                         + "\n\nVérifie que Tailscale est activé et que l'adresse est la bonne."));
@@ -96,7 +100,7 @@ public class ConfigActivity extends Activity {
     }
 
     private void showDevices(String url, JSONArray devices) {
-        Api.prefs(this).edit().putString("server", url).apply();
+        Api.prefs(this).edit().putString("server", url).putString("server_ok", url).apply();
         ShellyLinkWidget.updateAll(this);
         if (devices.length() == 0) {
             status.setText("Connecté, mais aucune prise : ajoute-la d'abord dans l'appli web.");
@@ -124,6 +128,15 @@ public class ConfigActivity extends Activity {
             b.setOnClickListener(v -> choose(id));
             list.addView(b);
         }
+    }
+
+    private void showAddresses(JSONObject info) {
+        if (info == null) return;
+        StringBuilder sb = new StringBuilder("\n\nAdresses du Pi trouvées :");
+        JSONArray lan = info.optJSONArray("lan"), ts = info.optJSONArray("tailscale");
+        for (int i = 0; lan != null && i < lan.length(); i++) sb.append("\n🏠 ").append(lan.optString(i)).append(" (maison)");
+        for (int i = 0; ts != null && i < ts.length(); i++) sb.append("\n🌍 ").append(ts.optString(i)).append(" (Tailscale)");
+        status.append(sb.toString());
     }
 
     private void choose(String deviceId) {

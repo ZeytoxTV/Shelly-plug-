@@ -7,7 +7,6 @@ import android.appwidget.AppWidgetProvider;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
-import android.net.Uri;
 import android.os.SystemClock;
 import android.widget.RemoteViews;
 
@@ -147,7 +146,7 @@ public class ShellyWidget extends AppWidgetProvider {
             v.setTextViewText(R.id.dot, "●");
             v.setTextColor(R.id.dot, 0xFFDC2626);
             v.setTextViewText(R.id.power, "—");
-            v.setTextViewText(R.id.sub, "Pi injoignable · Tailscale activé ?");
+            v.setTextViewText(R.id.sub, "Pi injoignable (ni Wi‑Fi maison, ni Tailscale)");
             v.setTextViewText(R.id.toggle, "Réessayer");
             v.setInt(R.id.toggle, "setBackgroundResource", R.drawable.btn_off);
             v.setOnClickPendingIntent(R.id.toggle, broadcastFor(ctx, ACTION_REFRESH, id));
@@ -205,7 +204,8 @@ public class ShellyWidget extends AppWidgetProvider {
         // 4×4 : bouton ↻ ; 2×2 : toucher le nom rafraîchit
         v.setOnClickPendingIntent(R.id.refresh, broadcastFor(ctx, ACTION_REFRESH, id));
         v.setOnClickPendingIntent(R.id.header, broadcastFor(ctx, ACTION_REFRESH, id));
-        Intent open = new Intent(Intent.ACTION_VIEW, Uri.parse(Api.server(ctx) + "/"));
+        // Ouvre l'appli web sur l'adresse qui répond (maison ou Tailscale)
+        Intent open = new Intent(ctx, LinkActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         v.setOnClickPendingIntent(R.id.chart, PendingIntent.getActivity(ctx, id, open,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
         return v;

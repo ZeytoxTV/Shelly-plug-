@@ -246,6 +246,17 @@ class ServerTests(unittest.TestCase):
         from shelly_app.server import Settings
         self.assertEqual(Settings(path).pricing["tariffs"][0]["price"], 0.3)
 
+    def test_info_lists_addresses(self):
+        from unittest import mock
+        from shelly_app import server as srv
+        fake = mock.Mock(stdout="192.168.1.13 100.100.255.12 172.17.0.1 fd7a:115c::1\n")
+        with mock.patch.object(srv.subprocess, "run", return_value=fake):
+            code, info = self.req("GET", "/api/info")
+        port = self.app.server_port
+        self.assertEqual(code, 200)
+        self.assertEqual(info["lan"], [f"http://192.168.1.13:{port}"])
+        self.assertEqual(info["tailscale"], [f"http://100.100.255.12:{port}"])
+
     def test_unreachable(self):
         self.assertEqual(self.req("POST", "/api/devices", {"host": "127.0.0.1:1"})[0], 502)
 

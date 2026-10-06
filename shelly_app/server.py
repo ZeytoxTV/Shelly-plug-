@@ -4,7 +4,10 @@ Lancement :  python3 -m shelly_app  [--port 8080] [--bind 0.0.0.0] [--config dev
 """
 
 import argparse
+import ipaddress
 import json
+import socket
+import subprocess
 import mimetypes
 import threading
 import time
@@ -130,6 +133,41 @@ class Settings:
             self._save()
 
 
+TAILSCALE_NET = ipaddress.ip_network("100.64.0.0/10")
+
+
+def local_addresses():
+    """Adresses IPv4 du serveur : réseau de la maison et Tailscale (pour le widget et le site)."""
+    ips = []
+    try:
+        out = subprocess.run(["hostname", "-I"], capture_output=True, text=True, timeout=2).stdout
+        ips = out.split()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    if not ips:  # repli : adresse de la route par défaut
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.connect(("192.0.2.1", 9))
+                ips = [sock.getsockname()[0]]
+        except OSError:
+            pass
+    lan, tailscale = [], []
+    for raw in ips:
+        try:
+            ip = ipaddress.ip_address(raw)
+        except ValueError:
+            continue
+        if ip.version != 4 or ip.is_loopback or ip.is_link_local:
+            continue
+        if ip in TAILSCALE_NET:
+            tailscale.append(str(ip))
+        elif ip.is_private:
+            # Les réseaux internes de Docker (172.17…) ne sont pas joignables depuis le téléphone
+            if not str(ip).startswith("172.17."):
+                lan.append(str(ip))
+    return {"lan": lan, "tailscale": tailscale}
+
+
 def client_for(device):
     if device.get("mode") == "cloud":
         cloud = CloudClient(device["server"], device["auth_key"], device["device_id"])
@@ -193,6 +231,14 @@ class Handler(BaseHTTPRequestHandler):
         parts = self._parts()
         if parts == ["api", "settings"]:
             return self._json(200, {"pricing": self.settings.pricing, "notify": self.settings.notify})
+        if parts == ["api", "info"]:
+            port = self.server.server_address[1]
+            addrs = local_addresses()
+            return self._json(200, {
+                "port": port,
+                "lan": [f"http://{ip}:{port}" for ip in addrs["lan"]],
+                "tailscale": [f"http://{ip}:{port}" for ip in addrs["tailscale"]],
+            })
         if parts[:2] == ["api", "devices"]:
             if len(parts) == 2:
                 return self._json(200, self.store.public())

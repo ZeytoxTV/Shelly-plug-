@@ -102,6 +102,11 @@ complet, **Prise Shelly (2×2)**, compact (puissance, état, mini-courbe, bouton
 2. Appui long sur l'écran d'accueil → **Widgets** → **Shelly Widget** → place-le en 4×4.
 3. Vérifie l'adresse du Pi (Tailscale doit être actif sur le téléphone) et choisis la prise.
 
+Le widget connaît **les deux adresses du Pi** (maison et Tailscale, récupérées via `/api/info`) :
+il essaie la dernière qui a marché puis les autres. À la maison il marche sans Tailscale, dehors
+il passe par Tailscale. Le raccourci 1×1 ouvre le site sur l'adresse qui répond, et le bas de la
+page web affiche les deux adresses (à mettre en favori).
+
 Le widget se met à jour environ toutes les 15 min, après chaque appui, et avec **↻**.
 Toucher la courbe ouvre l'appli web. Si l'appareil consomme plus de 30 W, **Éteindre** demande
 un second appui dans les 5 s, pour ne pas couper le PC par erreur.
@@ -187,6 +192,7 @@ curl http://localhost:8080/api/devices/<id>/schedule                     # progr
 curl http://localhost:8080/api/devices/<id>/widget                       # résumé compact (widget)
 curl http://localhost:8080/api/devices/<id>/cost                         # coût du jour et du mois
 curl http://localhost:8080/api/settings                                  # tarifs (PUT pour modifier)
+curl http://localhost:8080/api/info                                      # adresses du Pi (maison, Tailscale)
 ```
 
 ## Tests

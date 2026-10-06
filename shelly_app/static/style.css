@@ -245,3 +245,6 @@ section[hidden] { display: none; }
 #notify-dialog details { display: flex; flex-direction: column; gap: 10px; }
 #notify-dialog summary { cursor: pointer; color: var(--muted); margin-bottom: 8px; }
 #notify-dialog a.chip { text-decoration: none; display: inline-block; }
+
+.footer.addresses { line-height: 1.7; }
+.footer.addresses a { color: var(--text); }
