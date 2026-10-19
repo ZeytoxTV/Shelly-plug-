@@ -4,6 +4,7 @@ Lancement :  python3 -m shelly_app  [--port 8080] [--bind 0.0.0.0] [--config dev
 """
 
 import argparse
+import http.cookies
 import ipaddress
 import json
 import socket
@@ -17,6 +18,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from .access import COOKIE, HEADER, Access, remove_pin, set_pin
 from .automation import DEFAULT_SCHEDULE, Automation, next_event, normalize_schedule
 from .history import History
 from .notify import Notifier, default_notify, normalize_notify
@@ -184,6 +186,7 @@ class Handler(BaseHTTPRequestHandler):
     history: History = None
     settings: Settings = None
     automation: Automation = None
+    access: Access = None
     server_version = "ShellyApp/1.0"
 
     def log_message(self, fmt, *args):
@@ -191,9 +194,11 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- Helpers ---------------------------------------------------------
 
-    def _json(self, code, payload):
+    def _json(self, code, payload, headers=()):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
+        for k, v in headers:
+            self.send_header(k, v)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
@@ -214,6 +219,42 @@ class Handler(BaseHTTPRequestHandler):
     def _parts(self):
         return [p for p in self.path.split("?", 1)[0].split("/") if p]
 
+    def _token(self):
+        token = self.headers.get(HEADER)
+        if token:
+            return token
+        try:
+            jar = http.cookies.SimpleCookie(self.headers.get("Cookie") or "")
+        except http.cookies.CookieError:
+            return None
+        return jar[COOKIE].value if COOKIE in jar else None
+
+    def _blocked(self, parts):
+        """Répond par une erreur et renvoie True si la requête n'est pas autorisée."""
+        if self.command != "GET":
+            # Une page d'un autre site ne doit pas pouvoir piloter la prise depuis ton navigateur
+            origin = self.headers.get("Origin")
+            if origin and urllib.parse.urlsplit(origin).netloc != self.headers.get("Host"):
+                self._json(403, {"error": "Origine refusée"})
+                return True
+        if parts[:1] != ["api"] or parts in (["api", "info"], ["api", "auth"], ["api", "login"]):
+            return False
+        if self.access.allowed(self.client_address[0], self._token()):
+            return False
+        self._json(401, {"error": "Code d'accès requis", "auth_required": True})
+        return True
+
+    def _auth_status(self):
+        ok = self.access.allowed(self.client_address[0], self._token())
+        return self._json(200, {"enabled": self.access.enabled, "ok": ok})
+
+    def _login(self, body):
+        token, error = self.access.login(self.client_address[0], body.get("pin"))
+        if error:
+            return self._json(401 if "incorrect" in error else 429, {"error": error})
+        cookie = f"{COOKIE}={token}; Path=/; Max-Age=315360000; HttpOnly; SameSite=Strict"
+        return self._json(200, {"ok": True, "token": token}, headers=[("Set-Cookie", cookie)])
+
     def _device_call(self, device, fn):
         try:
             result = fn(client_for(device))
@@ -229,6 +270,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parts = self._parts()
+        if self._blocked(parts):
+            return
+        if parts == ["api", "auth"]:
+            return self._auth_status()
         if parts == ["api", "settings"]:
             return self._json(200, {"pricing": self.settings.pricing, "notify": self.settings.notify})
         if parts == ["api", "info"]:
@@ -289,9 +334,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parts = self._parts()
+        if self._blocked(parts):
+            return
         body = self._body()
         if body is None:
             return self._json(400, {"error": "JSON invalide"})
+
+        if parts == ["api", "login"]:
+            return self._login(body)
 
         if parts == ["api", "devices"]:
             return self._add_device(body)
@@ -329,6 +379,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         parts = self._parts()
+        if self._blocked(parts):
+            return
         body = self._body()
         if body is None:
             return self._json(400, {"error": "JSON invalide"})
@@ -399,6 +451,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         parts = self._parts()
+        if self._blocked(parts):
+            return
         if len(parts) == 3 and parts[:2] == ["api", "devices"]:
             if self.store.remove(parts[2]):
                 self.automation.forget(parts[2])
@@ -469,7 +523,8 @@ def make_server(bind, port, config, history_db=None):
     handler = type(
         "BoundHandler",
         (Handler,),
-        {"store": store, "history": history, "automation": automation, "settings": settings},
+        {"store": store, "history": history, "automation": automation, "settings": settings,
+         "access": Access(Path(config).with_name("access.json"))},
     )
     server = ThreadingHTTPServer((bind, port), handler)
     server.automation = automation
@@ -481,7 +536,22 @@ def main(argv=None):
     parser.add_argument("--bind", default="0.0.0.0", help="adresse d'écoute (défaut : 0.0.0.0)")
     parser.add_argument("--port", type=int, default=8080, help="port (défaut : 8080)")
     parser.add_argument("--config", default="devices.json", help="fichier des appareils")
+    parser.add_argument("--set-pin", metavar="CODE", help="protège le site par un code (4 à 12 chiffres) et quitte")
+    parser.add_argument("--remove-pin", action="store_true", help="retire le code d'accès et quitte")
     args = parser.parse_args(argv)
+
+    access_file = Path(args.config).with_name("access.json")
+    if args.set_pin is not None:
+        try:
+            set_pin(access_file, args.set_pin)
+        except ValueError as e:
+            parser.exit(1, f"{e}\n")
+        print("✅ Code enregistré. Il sera demandé sur le Wi-Fi de la maison (pas via Tailscale).")
+        return
+    if args.remove_pin:
+        remove_pin(access_file)
+        print("✅ Code retiré : le site est de nouveau ouvert sur le Wi-Fi.")
+        return
 
     server = make_server(args.bind, args.port, args.config)
     server.automation.start()

@@ -73,6 +73,19 @@
     </article>
   </template>
 
+  <dialog id="pin-dialog">
+    <form id="pin-form" class="pin-form">
+      <h2>🔒 Code d'accès</h2>
+      <p class="hint">Tape le code de ta Shelly App. Il ne sera plus demandé sur cet appareil.</p>
+      <input name="pin" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="current-password"
+             minlength="4" maxlength="12" required aria-label="Code d'accès">
+      <p class="error" id="pin-error" hidden></p>
+      <div class="actions">
+        <button type="submit">Valider</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="add-dialog">
     <form method="dialog" id="add-form">
       <h2>Ajouter une prise</h2>

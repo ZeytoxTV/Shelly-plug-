@@ -18,7 +18,7 @@ function checkVersion(v) {
   else if (v !== appVersion && !document.querySelector("dialog[open]")) location.reload();
 }
 
-async function api(path, options = {}) {
+async function api(path, options = {}, retried = false) {
   const res = await fetch(path, {
     headers: { "Content-Type": "application/json" },
     ...options,
@@ -26,8 +26,49 @@ async function api(path, options = {}) {
   });
   checkVersion(res.headers.get("X-App-Version"));
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && data.auth_required && !retried) {
+    await askPin();
+    return api(path, options, true);
+  }
   if (!res.ok) throw new Error(data.error || `Erreur ${res.status}`);
   return data;
+}
+
+// Code d'accès : demandé une seule fois par navigateur (le serveur pose un cookie).
+let pinPrompt = null;
+function askPin() {
+  if (pinPrompt) return pinPrompt;
+  const dlg = document.getElementById("pin-dialog");
+  const form = document.getElementById("pin-form");
+  const input = form.elements.pin;
+  const err = document.getElementById("pin-error");
+  pinPrompt = new Promise((resolve) => {
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      err.hidden = true;
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: input.value }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        dlg.close();
+        pinPrompt = null;
+        resolve();
+      } else {
+        err.textContent = data.error || `Erreur ${res.status}`;
+        err.hidden = false;
+        input.select();
+      }
+    };
+    dlg.oncancel = (e) => e.preventDefault(); // pas d'accès sans le code
+    input.value = "";
+    err.hidden = true;
+    dlg.showModal();
+    input.focus();
+  });
+  return pinPrompt;
 }
 
 const num = (v, digits) =>

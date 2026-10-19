@@ -148,7 +148,28 @@ ouvre `http://<IP-de-ton-ordinateur>:8080`, puis « Ajouter à l'écran d'accuei
 | `--bind` | `0.0.0.0` | Adresse d'écoute (`127.0.0.1` pour limiter à cette machine) |
 | `--config` | `devices.json` | Fichier où sont enregistrées les prises |
 
-> ⚠️ Les mots de passe des prises sont stockés en clair dans `devices.json` (jamais renvoyés au navigateur). L'appli n'a pas d'authentification propre : n'expose pas le port sur Internet.
+> ⚠️ Les mots de passe des prises sont stockés en clair dans `devices.json` (jamais renvoyés au navigateur). N'expose pas le port sur Internet.
+
+### Code d'accès (PIN)
+
+Sans code, toute personne connectée au Wi‑Fi peut ouvrir le site et couper une prise. Pour l'éviter,
+sur le Pi :
+
+```bash
+cd ~/shelly-app && python3 -m shelly_app --config devices.json --set-pin 123456
+```
+
+Le code (4 à 12 chiffres) est demandé une fois par navigateur sur le Wi‑Fi de la maison, puis
+retenu. Via Tailscale (100.x.x.x) et depuis le Pi lui-même, rien n'est demandé. Il est enregistré
+haché dans `access.json` et pris en compte sans redémarrer. Après 5 essais ratés, l'appareil
+attend 60 s. Changer le code déconnecte les appareils déjà connectés. Pour l'enlever :
+`--remove-pin` à la place de `--set-pin 123456`.
+
+En script, envoie le jeton renvoyé par `POST /api/login {"pin": "…"}` dans l'en-tête
+`X-Shelly-Token`.
+
+> Le widget Android 1.3 ne connaît pas le code. Une fois le code activé, il ne marche plus sur le
+> Wi‑Fi de la maison : il faut une version qui demande le code dans ses Paramètres.
 
 ## Installation sur un Raspberry Pi
 
