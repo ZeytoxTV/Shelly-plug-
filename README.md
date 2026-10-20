@@ -104,7 +104,8 @@ complet, **Prise Shelly (2×2)**, compact (puissance, état, mini-courbe, bouton
 
 Le widget connaît **les deux adresses du Pi** (maison et Tailscale, récupérées via `/api/info`) :
 il essaie la dernière qui a marché puis les autres. À la maison il marche sans Tailscale, dehors
-il passe par Tailscale. Le raccourci 1×1 ouvre le site sur l'adresse qui répond, et le bas de la
+il passe par Tailscale. Si un code d'accès (PIN) est activé, l'écran de réglage du widget le demande
+une fois ; sans code, le widget passe par Tailscale. Le raccourci 1×1 ouvre le site sur l'adresse qui répond, et le bas de la
 page web affiche les deux adresses (à mettre en favori).
 
 Le widget se met à jour environ toutes les 15 min, après chaque appui, et avec **↻**.

@@ -35,9 +35,31 @@ final class Api {
 
     /** Le Pi a répondu avec une erreur (ex. prise injoignable) : inutile d'essayer une autre adresse. */
     static final class ServerError extends Exception {
-        ServerError(String message) {
+        final int code;
+        final boolean authRequired;
+
+        ServerError(String message, int code, boolean authRequired) {
             super(message);
+            this.code = code;
+            this.authRequired = authRequired;
         }
+    }
+
+    /** Jeton d'accès du site (si un code PIN est activé sur le Pi), envoyé à chaque requête. */
+    private static volatile String token;
+
+    static void loadToken(Context c) {
+        token = prefs(c).getString("token", null);
+    }
+
+    /** Envoie le code PIN au Pi et retient le jeton reçu. */
+    static void login(Context c, String base, String pin) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("pin", pin);
+        String t = new JSONObject(request("POST", normalize(base) + "/api/login", body.toString(), CONNECT_TIMEOUT_MS))
+                .optString("token", "");
+        prefs(c).edit().putString("token", t).apply();
+        token = t;
     }
 
     static SharedPreferences prefs(Context c) {
@@ -84,6 +106,7 @@ final class Api {
         conn.setConnectTimeout(connectTimeout);
         conn.setReadTimeout(TIMEOUT_MS);
         conn.setRequestMethod(method);
+        if (token != null && !token.isEmpty()) conn.setRequestProperty("X-Shelly-Token", token);
         if (body != null) {
             conn.setDoOutput(true);
             conn.setRequestProperty("Content-Type", "application/json");
@@ -105,11 +128,14 @@ final class Api {
         conn.disconnect();
         if (code >= 400) {
             String msg = "Erreur " + code;
+            boolean auth = false;
             try {
-                msg = new JSONObject(text).optString("error", msg);
+                JSONObject err = new JSONObject(text);
+                msg = err.optString("error", msg);
+                auth = err.optBoolean("auth_required", false);
             } catch (Exception ignored) {
             }
-            throw new ServerError(msg);
+            throw new ServerError(msg, code, auth);
         }
         return text;
     }
@@ -120,7 +146,9 @@ final class Api {
 
     /** Appelle le Pi sur la première adresse qui répond, et la retient pour la prochaine fois. */
     static String call(Context c, String method, String path, String body) throws Exception {
+        if (token == null) loadToken(c);
         Exception last = null;
+        ServerError authError = null;
         for (String base : candidates(c)) {
             try {
                 String text = request(method, base + path, body, CONNECT_TIMEOUT_MS);
@@ -129,10 +157,18 @@ final class Api {
                 maybeLearnAddresses(c, base);
                 return text;
             } catch (ServerError e) {
+                // Code PIN demandé sur le Wi‑Fi : Tailscale passe sans code, on essaie l'adresse suivante
+                if (e.authRequired) {
+                    authError = e;
+                    continue;
+                }
                 throw e; // le Pi a répondu : pas la peine d'essayer ailleurs
             } catch (IOException e) {
                 last = e; // adresse injoignable : on essaie la suivante
             }
+        }
+        if (authError != null) {
+            throw new ServerError("Code d'accès requis : ouvre l'appli Shelly Widget pour le saisir", 401, true);
         }
         throw new Exception("Pi injoignable" + (last != null ? " (" + last.getClass().getSimpleName() + ")" : ""));
     }
@@ -159,6 +195,7 @@ final class Api {
 
     /** Première adresse qui répond (pour ouvrir l'appli web), ou la dernière connue. */
     static String reachableServer(Context c) {
+        if (token == null) loadToken(c);
         for (String base : candidates(c)) {
             try {
                 request("GET", base + "/api/info", null, 1500);
@@ -172,7 +209,8 @@ final class Api {
         return server(c);
     }
 
-    static JSONArray devices(String server) throws Exception {
+    static JSONArray devices(Context c, String server) throws Exception {
+        if (token == null) loadToken(c);
         return new JSONArray(request("GET", normalize(server) + "/api/devices", null, CONNECT_TIMEOUT_MS));
     }
 

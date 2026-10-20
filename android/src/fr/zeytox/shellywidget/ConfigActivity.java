@@ -86,17 +86,50 @@ public class ConfigActivity extends Activity {
         list.removeAllViews();
         new Thread(() -> {
             try {
-                JSONArray devices = Api.devices(url);
+                JSONArray devices = Api.devices(getApplicationContext(), url);
                 JSONObject info = Api.learnAddresses(getApplicationContext(), url);
                 runOnUiThread(() -> {
                     showDevices(url, devices);
                     showAddresses(info);
                 });
+            } catch (Api.ServerError e) {
+                if (e.authRequired) {
+                    runOnUiThread(() -> askPin(url, null));
+                } else {
+                    runOnUiThread(() -> status.setText("Le Pi a répondu : " + e.getMessage()));
+                }
             } catch (Exception e) {
                 runOnUiThread(() -> status.setText("Impossible de joindre le Pi : " + e.getMessage()
-                        + "\n\nVérifie que Tailscale est activé et que l'adresse est la bonne."));
+                        + "\n\nVérifie que tu es sur le Wi‑Fi de la maison ou que Tailscale est activé, "
+                        + "et que l'adresse est la bonne."));
             }
         }).start();
+    }
+
+    /** Le Pi demande le code d'accès (PIN activé, connexion par le Wi‑Fi) : on le demande une fois. */
+    private void askPin(String url, String error) {
+        status.setText((error != null ? error + "\n\n" : "")
+                + "🔒 Le site est protégé par un code d'accès sur le Wi‑Fi. Tape-le une fois :");
+        list.removeAllViews();
+        EditText pin = new EditText(this);
+        pin.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        pin.setHint("Code d'accès");
+        list.addView(pin, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        Button ok = new Button(this);
+        ok.setText("Valider");
+        ok.setOnClickListener(v -> {
+            final String code = pin.getText().toString().trim();
+            status.setText("Vérification du code…");
+            new Thread(() -> {
+                try {
+                    Api.login(getApplicationContext(), url, code);
+                    runOnUiThread(this::loadDevices);
+                } catch (Exception e) {
+                    runOnUiThread(() -> askPin(url, "❌ " + e.getMessage()));
+                }
+            }).start();
+        });
+        list.addView(ok);
     }
 
     private void showDevices(String url, JSONArray devices) {
