@@ -1,0 +1,19 @@
+services:
+  freqtrade:
+    image: freqtradeorg/freqtrade:stable
+    restart: unless-stopped
+    container_name: freqtrade
+    volumes:
+      - "./user_data:/freqtrade/user_data"
+    # Les secrets (mot de passe interface, clés API, Telegram) sont dans .env
+    env_file:
+      - .env
+    # Interface web FreqUI : http://localhost:8080 (accessible seulement depuis ta machine)
+    ports:
+      - "127.0.0.1:8080:8080"
+    command: >
+      trade
+      --logfile /freqtrade/user_data/logs/freqtrade.log
+      --db-url sqlite:////freqtrade/user_data/tradesv3.sqlite
+      --config /freqtrade/user_data/config.json
+      --strategy SampleStrategy
