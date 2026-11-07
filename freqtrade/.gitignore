@@ -10,3 +10,4 @@ user_data/*.sqlite
 user_data/*.sqlite-*
 user_data/config-private.json
 __pycache__/
+user_data/comparatif/

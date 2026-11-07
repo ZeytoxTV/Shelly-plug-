@@ -70,6 +70,28 @@ docker compose run --rm freqtrade backtesting --config /freqtrade/user_data/conf
 Les stratégies sont dans `user_data/strategies/`. Pour en changer, mets le fichier `.py` dedans et
 modifie `--strategy` dans `docker-compose.yml`.
 
+## 5 bis. Comparatif automatique des stratégies
+
+Le script `comparatif/run_comparatif.py` télécharge les stratégies de
+[freqtrade-strategies](https://github.com/freqtrade/freqtrade-strategies) et la dernière version de
+[NostalgiaForInfinity](https://github.com/iterativv/NostalgiaForInfinity), récupère ~2 ans d'historique
+Binance sur 15 cryptos, backteste chaque stratégie depuis janvier 2025 et sort un classement :
+
+- 🛡️ **bot stable** : rentable, faible perte max, un maximum de mois positifs ;
+- 🧪 **bot labo** : meilleur profit brut avec une perte max < 40 % ;
+- détail par période : hausse (avr→juil 2025), baisse (oct 2025→fév 2026), sans tendance (mars→oct 2026).
+
+```bash
+docker compose run --rm comparatif
+```
+
+Compte 30 min à 2 h selon la machine (NostalgiaForInfinity est très lent). Le rapport est écrit dans
+`user_data/comparatif/rapport.md`.
+
+Options : `--sans-telechargement` (réutilise les stratégies déjà téléchargées), `--sans-donnees`
+(réutilise l'historique), `--strategies Nom1 Nom2` (ne tester que celles-là). Exemple :
+`docker compose run --rm comparatif --sans-donnees --strategies Supertrend Heracles`.
+
 ## 6. Passer en réel (plus tard, prudemment)
 
 Seulement après des backtests positifs **et** plusieurs semaines de dry-run correctes :
