@@ -21,7 +21,8 @@ Aucune dépendance : uniquement la bibliothèque standard Python (3.8+).
 - Détection automatique de la génération (Gen1 ou Gen2/Gen3)
 - Authentification supportée (Basic pour Gen1, Digest SHA-256 pour Gen2+)
 - Installable sur l'écran d'accueil du téléphone (PWA), thème clair/sombre automatique
-- **Widget Android 4×4** : état, conso, courbe 24 h, prochain horaire et bouton marche/arrêt
+- **Code d'accès (PIN)** optionnel pour le site depuis le Wi‑Fi (Tailscale passe sans code)
+- **Widgets Android** (4×4, 2×2 et raccourci 1×1) : état, conso, courbe 24 h, prochain horaire et bouton marche/arrêt
 
 ## Démarrage
 
@@ -89,18 +90,19 @@ Bouton **📈 Consommation** : le serveur relève la consommation chaque minute 
 d'historique (`history.db`, à côté de `devices.json`). Touche le graphique pour lire une valeur ;
 « Voir en tableau » donne les chiffres.
 
-### Widget Android 4×4
+### Widgets Android
 
-Une mini-appli Android (36 Ko, sans pub ni traceur) ajoute trois widgets : **Prise Shelly (4×4)**,
+Une mini-appli Android (version 1.4, 38 Ko, sans pub ni traceur) ajoute trois widgets : **Prise Shelly (4×4)**,
 complet, **Prise Shelly (2×2)**, compact (puissance, état, mini-courbe, bouton), et un
 **Raccourci Shelly App (1×1)** qui ouvre directement l'appli web. Le 4×4 affiche :
 état de la prise, puissance, énergie du jour, courbe des dernières 24 h, prochain horaire
 (ou arrêt reporté) et un gros bouton **Allumer / Éteindre**.
 
-1. Sur le téléphone, ouvre l'appli web et touche **📱 Installer le widget Android** en bas de page
+1. Sur le téléphone, ouvre l'appli web et touche **📱 Installer les widgets Android** en bas de page
    (ou `http://<pi>:8080/shelly-widget.apk`). Autorise l'installation depuis le navigateur.
-2. Appui long sur l'écran d'accueil → **Widgets** → **Shelly Widget** → place-le en 4×4.
-3. Vérifie l'adresse du Pi (Tailscale doit être actif sur le téléphone) et choisis la prise.
+2. Appui long sur l'écran d'accueil → **Widgets** → **Shelly Widget** → choisis le 4×4, le 2×2 ou le raccourci 1×1.
+3. Vérifie l'adresse du Pi (celle de la maison ou celle de Tailscale : l'autre est trouvée toute seule),
+   tape le code d'accès s'il est demandé, puis choisis la prise.
 
 Le widget connaît **les deux adresses du Pi** (maison et Tailscale, récupérées via `/api/info`) :
 il essaie la dernière qui a marché puis les autres. À la maison il marche sans Tailscale, dehors
