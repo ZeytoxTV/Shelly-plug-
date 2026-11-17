@@ -215,3 +215,24 @@ class AutomationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BackupTests(unittest.TestCase):
+    def test_daily_backup_keeps_last_days(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "devices.json").write_text("[]")
+            h = History(folder / "history.db")
+            h.add_event("d1", "bonjour", ts=1)
+            day0 = datetime(2026, 11, 1, 12).timestamp()
+            first = h.backup(day0)
+            self.assertIsNone(h.backup(day0 + 60))  # une seule copie par jour
+            copy = History(first)
+            self.assertEqual(copy.events("d1")[0]["message"], "bonjour")
+            copy.db.close()
+            for i in range(1, 10):
+                h.backup(day0 + i * 86400)
+            h.db.close()
+            names = sorted(f.name for f in (folder / "backups").iterdir())
+            self.assertEqual(len(names), 14)  # 7 jours x (base + devices.json)
+            self.assertEqual(names[0], "2026-11-04-devices.json")

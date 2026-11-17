@@ -8,3 +8,4 @@ settings.json
 access.json
 access.tmp
 graphify-out/
+backups/

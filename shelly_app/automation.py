@@ -190,6 +190,7 @@ class Automation:
             self._check_alerts(device, now, dt)
         if int(now) % 3600 < TICK_S:
             self.history.purge(now)
+            self.history.backup(now)
 
     def _notify(self, kind, title, message, device=None, **kw):
         if self.notifier:

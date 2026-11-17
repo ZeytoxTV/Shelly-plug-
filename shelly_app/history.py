@@ -1,17 +1,22 @@
 """Historique de consommation (SQLite) et agrégats pour les graphiques."""
 
+import shutil
 import sqlite3
 import threading
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
 RETENTION_DAYS = 90
+BACKUP_DAYS = 7
+CONFIG_FILES = ("devices.json", "settings.json", "access.json")
 MAX_GAP_S = 300  # au-delà, on n'intègre pas la puissance entre deux mesures
 
 
 class History:
     def __init__(self, path):
         self.lock = threading.Lock()
+        self.path = Path(path)
         self.db = sqlite3.connect(str(path), check_same_thread=False)
         with self.lock:
             self.db.executescript(
@@ -63,6 +68,31 @@ class History:
             self.db.execute("DELETE FROM samples WHERE ts < ?", (limit,))
             self.db.execute("DELETE FROM events WHERE ts < ?", (limit,))
             self.db.commit()
+
+    def backup(self, now=None):
+        """Copie du jour de la base et des réglages dans backups/, garde BACKUP_DAYS jours."""
+        # shortcut: sur la même carte SD, protège d'une base corrompue mais pas d'une carte morte
+        folder = self.path.parent / "backups"
+        day = datetime.fromtimestamp(now or time.time()).strftime("%Y-%m-%d")
+        dest = folder / f"{day}-history.db"
+        if dest.exists():
+            return None
+        folder.mkdir(exist_ok=True)
+        tmp = dest.with_suffix(".tmp")
+        target = sqlite3.connect(str(tmp))
+        with self.lock:
+            self.db.backup(target)
+        target.close()
+        tmp.replace(dest)
+        for name in CONFIG_FILES:
+            src = self.path.parent / name
+            if src.exists():
+                shutil.copy2(src, folder / f"{day}-{name}")
+        days = sorted({f.name[:10] for f in folder.iterdir() if f.name[:4].isdigit()})
+        for old in days[:-BACKUP_DAYS]:
+            for f in folder.glob(old + "-*"):
+                f.unlink()
+        return dest
 
     def forget(self, device_id):
         with self.lock:
